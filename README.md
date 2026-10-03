@@ -4,11 +4,12 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-HTTP forward proxy on `127.0.0.1:8080` for plain `http://` sites. Next: HTTPS with `CONNECT` (step 2.4).
+Step 2 (HTTP proxy) done: forward proxy on `127.0.0.1:8080` for `http://` and `https://` (via `CONNECT`). Next: SOCKS5 (step 3).
 
 ```bash
 go run . proxy                                             # terminal 1
 curl.exe -x http://127.0.0.1:8080 http://example.com/      # terminal 2
+curl.exe -x http://127.0.0.1:8080 https://example.com/
 ```
 
 ## Roadmap
@@ -31,7 +32,7 @@ Plain HTTP, then `CONNECT`. Requests, headers.
 - [x] 2.1 TCP forwarder: accept, dial a fixed target, relay both ways
 - [x] 2.2 Read the HTTP request (request line, headers, `\r\n` framing)
 - [x] 2.3 Plain HTTP proxy: dial the destination from the request, forward it
-- [ ] 2.4 `CONNECT`: HTTPS through the proxy
+- [x] 2.4 `CONNECT`: HTTPS through the proxy
 
 ### 3 — SOCKS5
 Binary protocol, IPv4/IPv6, DNS.

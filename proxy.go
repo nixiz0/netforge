@@ -52,6 +52,25 @@ func handleProxy(client net.Conn) {
 		return
 	}
 	method, rawURL, version := parts[0], parts[1], parts[2]
+
+	// HTTPS: "CONNECT example.com:443 HTTP/1.1". The client wants a raw TCP tunnel and will do TLS
+	// through it, end to end with the website: after the 200 reply we can only relay encrypted bytes.
+	if method == "CONNECT" {
+		upstream, err := net.DialTimeout("tcp", rawURL, 5*time.Second)
+		if err != nil {
+			log.Println("dial:", err)
+			io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+			return
+		}
+		defer upstream.Close()
+		log.Printf("%s -> proxy -> %s (CONNECT tunnel)", client.RemoteAddr(), upstream.RemoteAddr())
+
+		io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		relay(client, br, upstream)
+		return
+	}
+
+	// Plain HTTP: the full URL in the request line tells us where to go.
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
 		log.Println("not a proxy request:", rawURL)
@@ -71,6 +90,7 @@ func handleProxy(client net.Conn) {
 	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {
 		log.Println("dial:", err)
+		io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
 	defer upstream.Close()
@@ -82,14 +102,19 @@ func handleProxy(client net.Conn) {
 	}
 	io.WriteString(upstream, "\r\n")
 
-	// Relay both ways, like dial does. Client -> target in the background, reading from br and not
-	// client: bufio may already hold bytes that came after the head (a body). Pass the client's FIN on.
+	relay(client, br, upstream)
+}
+
+// relay copies bytes both ways until the target closes, like dial does.
+func relay(client net.Conn, br *bufio.Reader, upstream net.Conn) {
+	// Client -> target in the background, reading from br and not client: bufio may already hold
+	// bytes that came after the head (a body, or the start of the TLS handshake). Pass the client's FIN on.
 	go func() {
 		io.Copy(upstream, br)
 		upstream.(*net.TCPConn).CloseWrite()
 	}()
 
-	// Target -> client here. When the target sends FIN we return, and the defers close both connections.
+	// Target -> client here. When the target sends FIN we return, and the caller's defers close both connections.
 	io.Copy(client, upstream)
 	log.Printf("%s closed", client.RemoteAddr())
 }
