@@ -26,7 +26,7 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 - [ ] 1.8 Failures: refused vs timeout, DNS
 
 ### 2 — HTTP proxy
-Plain HTTP, then `CONNECT`. Requests, headers, L7.
+Plain HTTP, then `CONNECT`. Requests, headers.
 
 ### 3 — SOCKS5
 Binary protocol, IPv4/IPv6, DNS.
