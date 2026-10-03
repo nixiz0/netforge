@@ -6,13 +6,13 @@ Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [doc
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`. SOCKS5 server on `127.0.0.1:1080` in progress: it answers the greeting only. Next: read the CONNECT request (step 3.2).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`. SOCKS5 server on `127.0.0.1:1080` in progress: it answers the greeting and reads the CONNECT target, but does not relay yet. Next: share the relay (step 3.3).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
 curl.exe -x http://127.0.0.1:8080 https://example.com/
 
-go run ./cmd/netforge socks                                # SOCKS5 (greeting only)
+go run ./cmd/netforge socks                                # SOCKS5 (no relay yet)
 curl.exe --socks5-hostname 127.0.0.1:1080 http://example.com/
 ```
 
@@ -42,7 +42,7 @@ Plain HTTP, then `CONNECT`. Requests, headers.
 Binary protocol, IPv4/IPv6, DNS.
 
 - [x] 3.1 Greeting: method negotiation, binary framing with `io.ReadFull`
-- [ ] 3.2 Read the CONNECT request (address type, big-endian port)
+- [x] 3.2 Read the CONNECT request (address type, big-endian port)
 - [ ] 3.3 Share the relay: move it to `internal/relay`
 - [ ] 3.4 Connect, reply, relay: a working SOCKS5 proxy
 - [ ] 3.5 DNS: client-side vs proxy-side resolution

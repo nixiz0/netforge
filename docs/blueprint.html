@@ -206,7 +206,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.1", what: "SOCKS5 greeting" };
+const SYNC = { step: "3.2", what: "SOCKS5 CONNECT request" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
@@ -232,7 +232,7 @@ const FILES = {
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
-  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: greeting only)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, then (next step) read the CONNECT request"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"]] }
+  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: no relay yet)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, (next) dial and relay"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"]] }
 };
 
 // Scenarios = what the system can do today. Each step = one packet.
@@ -317,7 +317,7 @@ const SCENARIOS = {
     ]
   },
   socks: {
-    name: "SOCKS5 (wip)", blurb: "Step 3.1: the binary greeting. curl and the server agree on \"no authentication\".",
+    name: "SOCKS5 (wip)", blurb: "Binary greeting, then the CONNECT request: the target travels as typed bytes. Relay comes in 3.4.",
     run: ["go run ./cmd/netforge socks", "curl.exe --socks5-hostname 127.0.0.1:1080 http://example.com/"], boot: [["socks", "SOCKS5 server listening on 127.0.0.1:1080"]],
     steps: [
       { p: ["term", "socks"], t: "ctl", l: "handshake", f: "internal/socks/socks.go", c: "ln.Accept() → go handle(client)", k: "Same TCP as always", s: "SOCKS5 starts like every TCP server: Listen, Accept, one goroutine per client." },
@@ -325,7 +325,9 @@ const SCENARIOS = {
         log: [["socks", "127.0.0.1:52360 greeting: 05 01 00"]] },
       { p: ["socks", "term"], t: "data", l: "05 00", f: "internal/socks/socks.go", c: "conn.Write([]byte{version5, methodNoAuth})", k: "Method chosen", s: "Two bytes: version 5, \"no authentication\". 0xFF would mean none acceptable.",
         log: [["socks", "127.0.0.1:52360 greeting done, no authentication"]] },
-      { p: ["socks", "term"], t: "ctl", l: "FIN", f: "internal/socks/socks.go", c: "defer client.Close()", k: "Not finished yet", s: "curl now sends its CONNECT request, but reading it is step 3.2, so the server closes." }
+      { p: ["term", "socks"], t: "data", l: "05 01 00 03 0b example.com 00 50", f: "internal/socks/socks.go", c: "readRequest(conn)", k: "Typed address + big-endian port", s: "CONNECT, address type 03 = domain (length 0x0b = 11, then the name), port 00 50 = 80.",
+        log: [["socks", "127.0.0.1:52360 CONNECT example.com:80"]] },
+      { p: ["socks", "term"], t: "ctl", l: "FIN", f: "internal/socks/socks.go", c: "defer client.Close()", k: "Not finished yet", s: "The server knows the target. Dialing it and replying is step 3.4, so for now it closes." }
     ]
   }
 };
