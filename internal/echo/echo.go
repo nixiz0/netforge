@@ -1,4 +1,4 @@
-package main
+package echo
 
 import (
 	"io"  // general tools for reading and writing (io.Copy, io.EOF)
@@ -6,8 +6,8 @@ import (
 	"net" // sockets
 )
 
-// runEchoServer accepts TCP connections on addr and sends every byte back.
-func runEchoServer(addr string) {
+// Run accepts TCP connections on addr and sends every byte back.
+func Run(addr string) {
 	// socket() + bind() + listen(): the kernel now accepts TCP handshakes on this port.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -24,11 +24,11 @@ func runEchoServer(addr string) {
 			continue
 		}
 		// Handle each client in its own goroutine so the loop goes straight back to Accept().
-		go handleEcho(conn)
+		go handle(conn)
 	}
 }
 
-func handleEcho(conn net.Conn) {
+func handle(conn net.Conn) {
 	defer conn.Close()
 	log.Println("new connection from", conn.RemoteAddr())
 

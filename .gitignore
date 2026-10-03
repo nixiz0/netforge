@@ -1,0 +1,3 @@
+# Built binaries (go build ./cmd/netforge), at the repo root only
+/netforge
+/netforge.exe

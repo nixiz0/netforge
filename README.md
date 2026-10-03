@@ -9,7 +9,7 @@ Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [doc
 Step 2 (HTTP proxy) done: forward proxy on `127.0.0.1:8080` for `http://` and `https://` (via `CONNECT`). Next: SOCKS5 (step 3).
 
 ```bash
-go run . proxy                                             # terminal 1
+go run ./cmd/netforge proxy                                # terminal 1
 curl.exe -x http://127.0.0.1:8080 http://example.com/      # terminal 2
 curl.exe -x http://127.0.0.1:8080 https://example.com/
 ```
@@ -58,6 +58,8 @@ AEAD, auth, key exchange.
 Peers and routes.
 
 ## CLI
+
+Run with `go run ./cmd/netforge <command>`, or build once with `go build ./cmd/netforge`.
 
 Available:
 

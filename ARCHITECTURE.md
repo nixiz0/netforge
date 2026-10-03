@@ -8,32 +8,34 @@ Roadmap and usage live in [README.md](README.md); visual map in [docs/blueprint.
 |---|---|
 | Language | Go 1.27.1, module `github.com/nixiz0/netforge-go` |
 | Dependencies | Standard library only (`net`, `io`, `bufio`, `net/url`, `log`). Keep it that way unless a stage truly needs more (e.g. TUN, crypto). |
-| Build / run | `go run . <command>`, single binary, no config files, no flags yet (positional args only) |
+| Build / run | `go run ./cmd/netforge <command>` or `go build ./cmd/netforge` (binary ignored by git). Single binary, no config files, no flags yet (positional args only) |
 | Checks | `gofmt -l .` and `go vet ./...` must be clean. No automated tests yet. |
 | Dev platform | Windows 11 + PowerShell. Use `curl.exe` (not the `curl` alias) and `netstat -ano \| findstr <port>`. TUN/VPN stages will need Linux (VPS) for the server side. |
 
 ## Layout
 
-Flat `package main`, one file per role. Split into packages (`internal/...`) only when a second binary or real reuse appears (expected around SOCKS5/tunnel).
+Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per feature (importable only from this module). Docs stay at the root and in `docs/`.
 
-| File | Role | Entry point |
+| Path | Role | Entry point |
 |---|---|---|
-| `main.go` | Subcommand router on `os.Args[1]`, `usage()` exits 2 | `main()` |
-| `echo.go` | TCP echo server on `127.0.0.1:9000` | `runEchoServer(addr)` |
-| `dial.go` | Interactive TCP client (netcat-like), stdin ⇄ conn | `runDial(addr)` |
-| `proxy.go` | HTTP forward proxy on `127.0.0.1:8080`: plain HTTP + `CONNECT` | `runProxy()` |
+| `cmd/netforge/main.go` | Subcommand router on `os.Args[1]`, `usage()` exits 2 | `main()` |
+| `internal/echo/` | TCP echo server on `127.0.0.1:9000` | `echo.Run(addr)` |
+| `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
+| `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
+
+Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not import each other yet. When a helper is needed by two features (e.g. the two-way `relay`), move it to its own `internal/<name>` package instead of importing a sibling feature.
 
 ## Runtime model
 
 - **One process = one subcommand.** Servers block forever in an `Accept` loop; `log.Fatal` only at startup (listen failure).
 - **One goroutine per accepted connection.** Per-connection errors are logged and the connection dropped; the server keeps running.
-- **Relay pattern** (`dial.go`, `proxy.go` `relay()`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
+- **Relay pattern** (`dial.Run`, `proxy` `relay()`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
 - **Half-close propagation:** when one side sends FIN, forward it with `(*net.TCPConn).CloseWrite()`, never `Close()`, so in-flight bytes in the other direction are not lost. Full close happens via `defer` on both connections when the function returns.
 - **Timeouts:** outbound dials use `net.DialTimeout(..., 5*time.Second)`. No read/write/idle deadlines yet.
 - **Binding:** everything listens on loopback (`127.0.0.1`) by design. Exposing on `0.0.0.0` needs auth first.
 
-## Proxy internals (`proxy.go`)
+## Proxy internals (`internal/proxy`)
 
 1. `readHead(br)` reads lines with `bufio.Reader.ReadString('\n')` until the empty line (`\r\n`, bare `\n` tolerated).
 2. Request line split into `method target version`.
@@ -52,7 +54,7 @@ Flat `package main`, one file per role. Split into packages (`internal/...`) onl
 
 ## Conventions
 
-- Lowercase (unexported) identifiers; everything is `package main`.
+- Each feature package exports only what `main` needs (`Run`, sometimes a constant like `proxy.Addr`); everything else stays lowercase (unexported). Exported names get a doc comment starting with the name.
 - Comments describe the **network event** a line causes (SYN, FIN, EOF, framing), not the Go syntax.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.
@@ -60,8 +62,8 @@ Flat `package main`, one file per role. Split into packages (`internal/...`) onl
 
 ## Adding a subcommand
 
-1. New file `<name>.go` with `run<Name>(...)`.
-2. `case "<name>":` in `main.go` + one `usage()` line.
+1. New package `internal/<name>/<name>.go` (`package <name>`) exporting `Run(...)`.
+2. In `cmd/netforge/main.go`: import it, add `case "<name>":` calling `<name>.Run(...)`, add one `usage()` line.
 3. README: move it from `Planned` to `Available`, tick the roadmap step.
 4. Blueprint: update the data block (below).
 

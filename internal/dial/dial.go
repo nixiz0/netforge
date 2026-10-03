@@ -1,4 +1,4 @@
-package main
+package dial
 
 import (
 	"io"
@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// runDial connects to addr and relays bytes both ways: keyboard -> server, server -> screen.
-func runDial(addr string) {
+// Run connects to addr and relays bytes both ways: keyboard -> server, server -> screen.
+func Run(addr string) {
 	// DNS lookup if addr is a name, then socket() + connect(): the kernel sends SYN,
 	// Dial returns once the 3-way handshake is done, or fails after 5 s without an answer.
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)

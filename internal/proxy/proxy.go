@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bufio"
@@ -11,12 +11,13 @@ import (
 	"time"
 )
 
-const proxyAddr = "127.0.0.1:8080"
+// Addr is where the proxy listens: loopback only.
+const Addr = "127.0.0.1:8080"
 
-// runProxy is an HTTP forward proxy on proxyAddr: each request says where it wants to go.
-func runProxy() {
+// Run is an HTTP forward proxy on Addr: each request says where it wants to go.
+func Run() {
 	// Server toward the client: same Listen/Accept loop as the echo server.
-	ln, err := net.Listen("tcp", proxyAddr)
+	ln, err := net.Listen("tcp", Addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,11 +30,11 @@ func runProxy() {
 			log.Println("accept:", err)
 			continue
 		}
-		go handleProxy(client)
+		go handle(client)
 	}
 }
 
-func handleProxy(client net.Conn) {
+func handle(client net.Conn) {
 	defer client.Close()
 
 	// Read the HTTP request head (request line + headers) before connecting anywhere.

@@ -214,9 +214,9 @@ const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
 // Map nodes (viewBox 1000x580). `script` = Go file that runs there.
 const NODES = {
   term:   { x: 110, y: 160, label: "curl.exe", sub: "any HTTP client", info: "An app told to use the proxy: curl -x, or a browser. Not our code." },
-  dial:   { x: 110, y: 400, label: "dial", sub: "dial.go", script: "dial.go" },
-  proxy:  { x: 345, y: 160, label: "proxy", sub: "proxy.go", port: ":8080", script: "proxy.go" },
-  echo:   { x: 345, y: 290, label: "echo", sub: "echo.go", port: ":9000", script: "echo.go" },
+  dial:   { x: 110, y: 400, label: "dial", sub: "internal/dial", script: "internal/dial/dial.go" },
+  proxy:  { x: 345, y: 160, label: "proxy", sub: "internal/proxy", port: ":8080", script: "internal/proxy/proxy.go" },
+  echo:   { x: 345, y: 290, label: "echo", sub: "internal/echo", port: ":9000", script: "internal/echo/echo.go" },
   closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST." },
   router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies." },
   dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start." },
@@ -227,10 +227,10 @@ const LINKS = [["term", "proxy", 1], ["dial", "echo", 1], ["dial", "closed", 1],
 
 // Go files: shown in the Script card.
 const FILES = {
-  "main.go":  { role: "Command router", cmd: "go run .", fns: [["main()", "Reads os.Args[1], calls the right run* function"], ["usage()", "Prints help, exits 2"]] },
-  "echo.go":  { role: "Echo server on 127.0.0.1:9000", cmd: "go run . echo", fns: [["runEchoServer(addr)", "Listen, Accept forever, one goroutine per client"], ["handleEcho(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
-  "dial.go":  { role: "Interactive TCP client (mini netcat)", cmd: "go run . dial [addr]", fns: [["runDial(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
-  "proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run . proxy", fns: [["runProxy()", "Listen, Accept, go handleProxy"], ["handleProxy(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] }
+  "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run"], ["usage()", "Prints help, exits 2"]] },
+  "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
+  "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
+  "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] }
 };
 
 // Scenarios = what the system can do today. Each step = one packet.
@@ -238,80 +238,80 @@ const FILES = {
 const SCENARIOS = {
   echo: {
     name: "Echo", blurb: "Your own client and server talk over loopback, then close cleanly.",
-    run: ["go run . echo", "go run . dial"], boot: [["echo", "echo server listening on 127.0.0.1:9000"]],
+    run: ["go run ./cmd/netforge echo", "go run ./cmd/netforge dial"], boot: [["echo", "echo server listening on 127.0.0.1:9000"]],
     steps: [
-      { p: ["dial", "echo"], t: "ctl", l: "SYN", f: "dial.go", c: "net.DialTimeout(\"tcp\", addr, 5*time.Second)", k: "Handshake 1/3", s: "The client's kernel opens from an ephemeral port (52341)." },
-      { p: ["echo", "dial"], t: "ctl", l: "SYN-ACK", f: "echo.go", c: "kernel, no Go code runs", k: "Handshake 2/3", s: "The server's kernel answers by itself, from the listen backlog." },
-      { p: ["dial", "echo"], t: "ctl", l: "ACK", f: "echo.go", c: "ln.Accept() → go handleEcho(conn)", k: "Handshake 3/3 · ESTABLISHED", s: "Accept() returns the connection. One goroutine per client.",
+      { p: ["dial", "echo"], t: "ctl", l: "SYN", f: "internal/dial/dial.go", c: "net.DialTimeout(\"tcp\", addr, 5*time.Second)", k: "Handshake 1/3", s: "The client's kernel opens from an ephemeral port (52341)." },
+      { p: ["echo", "dial"], t: "ctl", l: "SYN-ACK", f: "internal/echo/echo.go", c: "kernel, no Go code runs", k: "Handshake 2/3", s: "The server's kernel answers by itself, from the listen backlog." },
+      { p: ["dial", "echo"], t: "ctl", l: "ACK", f: "internal/echo/echo.go", c: "ln.Accept() → go handle(conn)", k: "Handshake 3/3 · ESTABLISHED", s: "Accept() returns the connection. One goroutine per client.",
         log: [["dial", "connected 127.0.0.1:52341 -> 127.0.0.1:9000"], ["echo", "new connection from 127.0.0.1:52341"]] },
-      { p: ["dial", "echo"], t: "data", l: "\"hello\\n\"", f: "dial.go", c: "io.Copy(conn, os.Stdin)", k: "Byte stream", s: "6 bytes leave. TCP keeps the order, not message boundaries." },
-      { p: ["echo", "dial"], t: "data", l: "\"hello\\n\"", f: "echo.go", c: "io.Copy(conn, conn)", k: "Full-duplex", s: "The server writes back what it reads, on the same connection.", log: [["dial", "hello"]] },
-      { p: ["dial", "echo"], t: "ctl", l: "FIN", f: "dial.go", c: "conn.(*net.TCPConn).CloseWrite()", k: "Half-close", s: "Ctrl+Z closes one direction. The client keeps reading.", log: [["dial", "stdin closed, sending FIN"]] },
-      { p: ["echo", "dial"], t: "ctl", l: "FIN", f: "echo.go", c: "defer conn.Close()", k: "Graceful close · TIME_WAIT", s: "EOF ends io.Copy and the server closes. The client closed first, so it waits in TIME_WAIT.",
+      { p: ["dial", "echo"], t: "data", l: "\"hello\\n\"", f: "internal/dial/dial.go", c: "io.Copy(conn, os.Stdin)", k: "Byte stream", s: "6 bytes leave. TCP keeps the order, not message boundaries." },
+      { p: ["echo", "dial"], t: "data", l: "\"hello\\n\"", f: "internal/echo/echo.go", c: "io.Copy(conn, conn)", k: "Full-duplex", s: "The server writes back what it reads, on the same connection.", log: [["dial", "hello"]] },
+      { p: ["dial", "echo"], t: "ctl", l: "FIN", f: "internal/dial/dial.go", c: "conn.(*net.TCPConn).CloseWrite()", k: "Half-close", s: "Ctrl+Z closes one direction. The client keeps reading.", log: [["dial", "stdin closed, sending FIN"]] },
+      { p: ["echo", "dial"], t: "ctl", l: "FIN", f: "internal/echo/echo.go", c: "defer conn.Close()", k: "Graceful close · TIME_WAIT", s: "EOF ends io.Copy and the server closes. The client closed first, so it waits in TIME_WAIT.",
         log: [["echo", "127.0.0.1:52341 closed, echoed 6 bytes"], ["dial", "server closed the connection"]] }
     ]
   },
   web: {
     name: "Dial a site", blurb: "dial talks raw HTTP to a real web server: DNS, NAT, then plain text over TCP.",
-    run: ["go run . dial example.com:80"], boot: [],
+    run: ["go run ./cmd/netforge dial example.com:80"], boot: [],
     steps: [
-      { p: ["dial", "router", "dns"], t: "dns", l: "A? example.com", f: "dial.go", c: "net.DialTimeout(\"tcp\", \"example.com:80\", 5s)", k: "DNS lookup", s: "A name is not an address. Go asks DNS first, over UDP port 53." },
-      { p: ["dns", "router", "dial"], t: "dns", l: "203.0.113.10", f: "dial.go", c: "Go's resolver", k: "DNS answer", s: "Now TCP has an IP to target." },
-      { p: ["dial", "router", "site"], t: "ctl", l: "SYN", f: "dial.go", c: "net.DialTimeout(...)", k: "Handshake through NAT", s: "The router rewrites 192.168.1.20 to your public IP on the way out." },
-      { p: ["site", "router", "dial"], t: "ctl", l: "SYN-ACK", f: "dial.go", c: "kernel", k: "NAT state", s: "The router remembers the mapping and lets the reply back in." },
-      { p: ["dial", "router", "site"], t: "ctl", l: "ACK", f: "dial.go", c: "net.DialTimeout returns conn", k: "ESTABLISHED", s: "Same handshake as on loopback, over real links.", log: [["dial", "connected 192.168.1.20:52344 -> 203.0.113.10:80"]] },
-      { p: ["dial", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "dial.go", c: "io.Copy(conn, os.Stdin)", k: "HTTP is text over TCP", s: "You type a request line, a Host header, then an empty line." },
-      { p: ["site", "router", "dial"], t: "data", l: "200 OK + HTML", f: "dial.go", c: "io.Copy(os.Stdout, conn)", k: "HTTP response", s: "Status line, headers, empty line, body.", log: [["dial", "HTTP/1.1 200 OK  …headers…  <!doctype html>…"]] },
-      { p: ["site", "router", "dial"], t: "ctl", l: "FIN", f: "dial.go", c: "io.Copy returns → main exits", k: "Server closes first", s: "Connection: close. The server's FIN ends the client.", log: [["dial", "server closed the connection"]] }
+      { p: ["dial", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/dial/dial.go", c: "net.DialTimeout(\"tcp\", \"example.com:80\", 5s)", k: "DNS lookup", s: "A name is not an address. Go asks DNS first, over UDP port 53." },
+      { p: ["dns", "router", "dial"], t: "dns", l: "203.0.113.10", f: "internal/dial/dial.go", c: "Go's resolver", k: "DNS answer", s: "Now TCP has an IP to target." },
+      { p: ["dial", "router", "site"], t: "ctl", l: "SYN", f: "internal/dial/dial.go", c: "net.DialTimeout(...)", k: "Handshake through NAT", s: "The router rewrites 192.168.1.20 to your public IP on the way out." },
+      { p: ["site", "router", "dial"], t: "ctl", l: "SYN-ACK", f: "internal/dial/dial.go", c: "kernel", k: "NAT state", s: "The router remembers the mapping and lets the reply back in." },
+      { p: ["dial", "router", "site"], t: "ctl", l: "ACK", f: "internal/dial/dial.go", c: "net.DialTimeout returns conn", k: "ESTABLISHED", s: "Same handshake as on loopback, over real links.", log: [["dial", "connected 192.168.1.20:52344 -> 203.0.113.10:80"]] },
+      { p: ["dial", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "internal/dial/dial.go", c: "io.Copy(conn, os.Stdin)", k: "HTTP is text over TCP", s: "You type a request line, a Host header, then an empty line." },
+      { p: ["site", "router", "dial"], t: "data", l: "200 OK + HTML", f: "internal/dial/dial.go", c: "io.Copy(os.Stdout, conn)", k: "HTTP response", s: "Status line, headers, empty line, body.", log: [["dial", "HTTP/1.1 200 OK  …headers…  <!doctype html>…"]] },
+      { p: ["site", "router", "dial"], t: "ctl", l: "FIN", f: "internal/dial/dial.go", c: "io.Copy returns → main exits", k: "Server closes first", s: "Connection: close. The server's FIN ends the client.", log: [["dial", "server closed the connection"]] }
     ]
   },
   fail: {
     name: "Dial fails", blurb: "Two ways a connection fails: refused (RST) and timeout (silence).",
-    run: ["go run . dial 127.0.0.1:9001", "go run . dial 10.255.255.1:80"], boot: [],
+    run: ["go run ./cmd/netforge dial 127.0.0.1:9001", "go run ./cmd/netforge dial 10.255.255.1:80"], boot: [],
     steps: [
-      { p: ["dial", "closed"], t: "ctl", l: "SYN :9001", f: "dial.go", c: "net.DialTimeout(...)", k: "Port closed", s: "The host is up, but no program listens on 9001." },
-      { p: ["closed", "dial"], t: "ctl", l: "RST", f: "dial.go", c: "log.Fatal(err)", k: "Refused = RST", s: "The kernel resets at once. Network fine, port wrong.",
+      { p: ["dial", "closed"], t: "ctl", l: "SYN :9001", f: "internal/dial/dial.go", c: "net.DialTimeout(...)", k: "Port closed", s: "The host is up, but no program listens on 9001." },
+      { p: ["closed", "dial"], t: "ctl", l: "RST", f: "internal/dial/dial.go", c: "log.Fatal(err)", k: "Refused = RST", s: "The kernel resets at once. Network fine, port wrong.",
         log: [["dial", "dial tcp 127.0.0.1:9001: connectex: … actively refused it."]] },
-      { p: ["dial", "router", "void"], t: "lost", l: "SYN", f: "dial.go", c: "net.DialTimeout(..., 5*time.Second)", k: "No answer", s: "The SYN leaves and nothing comes back." },
-      { p: ["dial", "router", "void"], t: "lost", l: "SYN retry", f: "dial.go", c: "kernel retransmits", k: "Retransmission", s: "The kernel resends the SYN with growing delays." },
-      { p: ["dial"], t: "lost", l: "5 s timeout", f: "dial.go", c: "5*time.Second", k: "Timeout = silence", s: "Go gives up: host down, no route, or a firewall dropping packets.",
+      { p: ["dial", "router", "void"], t: "lost", l: "SYN", f: "internal/dial/dial.go", c: "net.DialTimeout(..., 5*time.Second)", k: "No answer", s: "The SYN leaves and nothing comes back." },
+      { p: ["dial", "router", "void"], t: "lost", l: "SYN retry", f: "internal/dial/dial.go", c: "kernel retransmits", k: "Retransmission", s: "The kernel resends the SYN with growing delays." },
+      { p: ["dial"], t: "lost", l: "5 s timeout", f: "internal/dial/dial.go", c: "5*time.Second", k: "Timeout = silence", s: "Go gives up: host down, no route, or a firewall dropping packets.",
         log: [["dial", "dial tcp 10.255.255.1:80: i/o timeout"]] }
     ]
   },
   http: {
     name: "HTTP proxy", blurb: "curl → proxy → site. Two separate TCP connections; the proxy reads and rewrites the request.",
-    run: ["go run . proxy", "curl.exe -x http://127.0.0.1:8080 http://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
+    run: ["go run ./cmd/netforge proxy", "curl.exe -x http://127.0.0.1:8080 http://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
     steps: [
-      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "proxy.go", c: "ln.Accept() → go handleProxy(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
-      { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "proxy.go", c: "readHead(br)", k: "Absolute-form request", s: "Through a proxy, the request line carries the full URL.",
+      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "internal/proxy/proxy.go", c: "ln.Accept() → go handle(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
+      { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "internal/proxy/proxy.go", c: "readHead(br)", k: "Absolute-form request", s: "Through a proxy, the request line carries the full URL.",
         log: [["proxy", "127.0.0.1:52350 request line: \"GET http://example.com/ HTTP/1.1\\r\\n\""]] },
-      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "proxy.go", c: "url.Parse(rawURL) → example.com:80", k: "Target from the URL", s: "No port in the URL means 80. Then a DNS lookup." },
-      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "proxy.go", c: "Go's resolver", k: "DNS answer", s: "The proxy resolves the name, not curl." },
-      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "proxy.go", c: "net.DialTimeout(\"tcp\", target, 5s)", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
+      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "url.Parse(rawURL) → example.com:80", k: "Target from the URL", s: "No port in the URL means 80. Then a DNS lookup." },
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "The proxy resolves the name, not curl." },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", target, 5s)", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
         log: [["proxy", "127.0.0.1:52350 -> proxy -> 203.0.113.10:80"]] },
-      { p: ["proxy", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "proxy.go", c: "head[0] = method + \" \" + u.RequestURI() + …", k: "Origin-form rewrite", s: "The site expects only the path." },
-      { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
-      { p: ["proxy", "term"], t: "data", l: "200 OK + HTML", f: "proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "…and is copied unchanged onto connection 1." },
-      { p: ["site", "router", "proxy"], t: "ctl", l: "FIN", f: "proxy.go", c: "io.Copy returns", k: "Close propagates", s: "The site closes connection 2." },
-      { p: ["proxy", "term"], t: "ctl", l: "FIN", f: "proxy.go", c: "defer client.Close()", k: "Close propagates", s: "The proxy closes connection 1.", log: [["proxy", "127.0.0.1:52350 closed"]] }
+      { p: ["proxy", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "internal/proxy/proxy.go", c: "head[0] = method + \" \" + u.RequestURI() + …", k: "Origin-form rewrite", s: "The site expects only the path." },
+      { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "internal/proxy/proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
+      { p: ["proxy", "term"], t: "data", l: "200 OK + HTML", f: "internal/proxy/proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "…and is copied unchanged onto connection 1." },
+      { p: ["site", "router", "proxy"], t: "ctl", l: "FIN", f: "internal/proxy/proxy.go", c: "io.Copy returns", k: "Close propagates", s: "The site closes connection 2." },
+      { p: ["proxy", "term"], t: "ctl", l: "FIN", f: "internal/proxy/proxy.go", c: "defer client.Close()", k: "Close propagates", s: "The proxy closes connection 1.", log: [["proxy", "127.0.0.1:52350 closed"]] }
     ]
   },
   https: {
     name: "HTTPS CONNECT", blurb: "curl asks for a tunnel, then TLS runs end to end. The proxy becomes a blind pipe.",
-    run: ["go run . proxy", "curl.exe -x http://127.0.0.1:8080 https://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
+    run: ["go run ./cmd/netforge proxy", "curl.exe -x http://127.0.0.1:8080 https://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
     steps: [
-      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "proxy.go", c: "ln.Accept() → go handleProxy(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
-      { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT", s: "Only host:port travels in clear text.",
+      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "internal/proxy/proxy.go", c: "ln.Accept() → go handle(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
+      { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "internal/proxy/proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT", s: "Only host:port travels in clear text.",
         log: [["proxy", "127.0.0.1:52351 request line: \"CONNECT example.com:443 HTTP/1.1\\r\\n\""]] },
-      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "DNS lookup", s: "The proxy resolves the name." },
-      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "proxy.go", c: "Go's resolver", k: "DNS answer", s: "Now it can connect to port 443." },
-      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
+      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "DNS lookup", s: "The proxy resolves the name." },
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "Now it can connect to port 443." },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
         log: [["proxy", "127.0.0.1:52351 -> proxy -> 203.0.113.10:443 (CONNECT tunnel)"]] },
-      { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
-      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "proxy.go", c: "relay(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
-      { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "proxy.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
-      { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "proxy.go", c: "io.Copy(upstream, br)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
-      { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "proxy.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
+      { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "internal/proxy/proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/proxy/proxy.go", c: "relay(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "internal/proxy/proxy.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/proxy/proxy.go", c: "io.Copy(upstream, br)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "internal/proxy/proxy.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
     ]
   }
 };
@@ -462,7 +462,7 @@ function renderScript() {
     $("#script").innerHTML = `<div class="hd"><span class="kick">On the map</span></div><h3>${esc(node.label)}${node.port ? " " + esc(node.port) : ""}</h3><p>${esc(node.info)}</p>`;
     return;
   }
-  const file = node ? node.script : st ? st.f : "main.go", f = FILES[file];
+  const file = node ? node.script : st ? st.f : "cmd/netforge/main.go", f = FILES[file];
   $("#script").innerHTML = `<div class="hd"><span class="kick">Script</span><span class="cnt">${esc(f.cmd)}</span></div>
     <h3>${file}</h3><p>${esc(f.role)}</p>
     <div class="fns">${f.fns.map(([n, d]) => `<div class="${st && !node && st.c.includes(n.split("(")[0]) ? "hit" : ""}"><code>${esc(n)}</code><span>${esc(d)}</span></div>`).join("")}</div>`;
