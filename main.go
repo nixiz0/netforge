@@ -15,6 +15,8 @@ func main() {
 	switch os.Args[1] {
 	case "echo":
 		runEchoServer(defaultAddr)
+	case "dial":
+		runDial(defaultAddr)
 	default:
 		usage()
 	}
@@ -23,5 +25,6 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: netforge <command>")
 	fmt.Fprintln(os.Stderr, "  echo   TCP echo server on "+defaultAddr)
+	fmt.Fprintln(os.Stderr, "  dial   connect to "+defaultAddr+", send one message, print the reply")
 	os.Exit(2)
 }

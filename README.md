@@ -4,10 +4,11 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-TCP echo server on `127.0.0.1:9000`. Next: a minimal TCP client (step 1.4).
+TCP echo server and a minimal TCP client on `127.0.0.1:9000`. Next: byte stream experiment (step 1.5).
 
 ```bash
-go run . echo
+go run . echo   # terminal 1
+go run . dial   # terminal 2
 ```
 
 ## Roadmap
@@ -18,7 +19,7 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 - [x] 1.1 Echo server, one client at a time
 - [x] 1.2 One goroutine per client
 - [x] 1.3 Split into files, `netforge echo` command
-- [ ] 1.4 Minimal client: dial, send, read
+- [x] 1.4 Minimal client: dial, send, read
 - [ ] 1.5 Byte stream: one `Read` is not one message
 - [ ] 1.6 Interactive client, both directions at once
 - [ ] 1.7 Half-close (FIN)
@@ -54,12 +55,12 @@ Available:
 
 ```bash
 netforge echo
+netforge dial
 ```
 
 Planned:
 
 ```bash
-netforge dial [addr]
 netforge proxy
 netforge socks
 netforge vpn client
