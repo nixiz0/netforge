@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bufio"
+	"io"
 	"log"
 	"net"
-	"time"
+	"os"
 )
 
-// runDial connects to addr, sends two messages and reads them back one line at a time.
+// runDial connects to addr and relays bytes both ways: keyboard -> server, server -> screen.
 func runDial(addr string) {
 	// socket() + connect(): the kernel sends SYN, Dial returns once the 3-way handshake is done.
 	conn, err := net.Dial("tcp", addr)
@@ -17,26 +17,17 @@ func runDial(addr string) {
 	defer conn.Close()
 	log.Printf("connected %s -> %s", conn.LocalAddr(), conn.RemoteAddr())
 
-	// Two separate messages, two separate Write calls, with a pause after each.
-	// Write returns once the bytes are in the kernel send buffer, not when the server got them.
-	for _, msg := range []string{"hello", "netforge\n"} {
-		n, err := conn.Write([]byte(msg))
-		if err != nil {
-			log.Fatal(err)
+	// TCP is full-duplex: both directions run at the same time, so each one needs its own goroutine.
+	// Direction 1: server -> screen, in the background.
+	go func() {
+		if _, err := io.Copy(os.Stdout, conn); err != nil {
+			log.Println("receive:", err)
 		}
-		log.Printf("sent %d bytes: %q", n, msg)
-		time.Sleep(100 * time.Millisecond)
-	}
+		log.Println("server closed the connection")
+	}()
 
-	// A single Read returns whatever bytes are waiting (here both messages glued together).
-	// Delimiter framing: read up to and including '\n', exactly one message per call,
-	// however TCP merged or split the bytes. bufio keeps leftover bytes for the next call.
-	r := bufio.NewReader(conn)
-	for i := 0; i < 2; i++ {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("message %d: %q", i+1, line)
+	// Direction 2: keyboard -> server, until stdin ends (Ctrl+Z then Enter on Windows).
+	if _, err := io.Copy(conn, os.Stdin); err != nil {
+		log.Println("send:", err)
 	}
 }
