@@ -4,11 +4,11 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-TCP echo server and an interactive TCP client on `127.0.0.1:9000`. Next: failures and DNS (step 1.8).
+Step 1 (TCP) done: echo server on `127.0.0.1:9000` and an interactive TCP client that can dial any address. Next: HTTP proxy (step 2).
 
 ```bash
 go run . echo   # terminal 1
-go run . dial   # terminal 2
+go run . dial   # terminal 2 (or: go run . dial example.com:80)
 ```
 
 ## Roadmap
@@ -23,7 +23,7 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 - [x] 1.5 Byte stream: one `Read` is not one message
 - [x] 1.6 Interactive client, both directions at once
 - [x] 1.7 Half-close (FIN)
-- [ ] 1.8 Failures: refused vs timeout, DNS
+- [x] 1.8 Failures: refused vs timeout, DNS
 
 ### 2 — HTTP proxy
 Plain HTTP, then `CONNECT`. Requests, headers.
@@ -55,7 +55,7 @@ Available:
 
 ```bash
 netforge echo
-netforge dial
+netforge dial [addr]
 ```
 
 Planned:
