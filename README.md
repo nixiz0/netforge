@@ -4,12 +4,11 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-TCP forwarder on `127.0.0.1:8080`, relaying every client to a fixed target (the echo server by default). Next: read the HTTP request (step 2.2).
+Proxy on `127.0.0.1:8080` that reads and logs the HTTP request head, then forwards it to a fixed target. Next: dial the `Host` from the request (step 2.3).
 
 ```bash
-go run . echo                  # terminal 1: echo server on 127.0.0.1:9000
-go run . proxy                 # terminal 2: proxy on 127.0.0.1:8080
-go run . dial 127.0.0.1:8080   # terminal 3: dial -> proxy -> echo
+go run . proxy example.com:80                              # terminal 1
+curl.exe -x http://127.0.0.1:8080 http://example.com/      # terminal 2
 ```
 
 ## Roadmap
@@ -30,7 +29,7 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 Plain HTTP, then `CONNECT`. Requests, headers.
 
 - [x] 2.1 TCP forwarder: accept, dial a fixed target, relay both ways
-- [ ] 2.2 Read the HTTP request (request line, headers, `\r\n` framing)
+- [x] 2.2 Read the HTTP request (request line, headers, `\r\n` framing)
 - [ ] 2.3 Plain HTTP proxy: dial the `Host`, forward the request
 - [ ] 2.4 `CONNECT`: HTTPS through the proxy
 
