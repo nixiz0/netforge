@@ -22,7 +22,8 @@ func main() {
 			log.Println("accept:", err)
 			continue
 		}
-		handle(conn)
+		// Handle each client in its own goroutine so the loop goes straight back to Accept().
+		go handle(conn)
 	}
 }
 
