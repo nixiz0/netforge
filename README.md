@@ -4,10 +4,10 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-Proxy on `127.0.0.1:8080` that reads and logs the HTTP request head, then forwards it to a fixed target. Next: dial the `Host` from the request (step 2.3).
+HTTP forward proxy on `127.0.0.1:8080` for plain `http://` sites. Next: HTTPS with `CONNECT` (step 2.4).
 
 ```bash
-go run . proxy example.com:80                              # terminal 1
+go run . proxy                                             # terminal 1
 curl.exe -x http://127.0.0.1:8080 http://example.com/      # terminal 2
 ```
 
@@ -30,7 +30,7 @@ Plain HTTP, then `CONNECT`. Requests, headers.
 
 - [x] 2.1 TCP forwarder: accept, dial a fixed target, relay both ways
 - [x] 2.2 Read the HTTP request (request line, headers, `\r\n` framing)
-- [ ] 2.3 Plain HTTP proxy: dial the `Host`, forward the request
+- [x] 2.3 Plain HTTP proxy: dial the destination from the request, forward it
 - [ ] 2.4 `CONNECT`: HTTPS through the proxy
 
 ### 3 — SOCKS5
@@ -61,7 +61,7 @@ Available:
 ```bash
 netforge echo
 netforge dial [addr]
-netforge proxy [target]
+netforge proxy
 ```
 
 Planned:

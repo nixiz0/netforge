@@ -6,20 +6,22 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
+	"strings"
 	"time"
 )
 
 const proxyAddr = "127.0.0.1:8080"
 
-// runProxy accepts clients on proxyAddr and relays each one to target (a plain TCP forwarder for now).
-func runProxy(target string) {
+// runProxy is an HTTP forward proxy on proxyAddr: each request says where it wants to go.
+func runProxy() {
 	// Server toward the client: same Listen/Accept loop as the echo server.
 	ln, err := net.Listen("tcp", proxyAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
-	log.Printf("proxy listening on %s, forwarding to %s", ln.Addr(), target)
+	log.Println("HTTP proxy listening on", ln.Addr())
 
 	for {
 		client, err := ln.Accept()
@@ -27,11 +29,11 @@ func runProxy(target string) {
 			log.Println("accept:", err)
 			continue
 		}
-		go handleProxy(client, target)
+		go handleProxy(client)
 	}
 }
 
-func handleProxy(client net.Conn, target string) {
+func handleProxy(client net.Conn) {
 	defer client.Close()
 
 	// Read the HTTP request head (request line + headers) before connecting anywhere.
@@ -42,9 +44,28 @@ func handleProxy(client net.Conn, target string) {
 		return
 	}
 	log.Printf("%s request line: %q", client.RemoteAddr(), head[0])
-	for _, h := range head[1:] {
-		log.Printf("  header: %q", h)
+
+	// A client talking to a proxy sends the full URL: "GET http://example.com/path HTTP/1.1".
+	parts := strings.Fields(head[0])
+	if len(parts) != 3 {
+		log.Println("bad request line")
+		return
 	}
+	method, rawURL, version := parts[0], parts[1], parts[2]
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		log.Println("not a proxy request:", rawURL)
+		return
+	}
+
+	// The destination comes from the URL; port 80 is the default for http://.
+	target := u.Host
+	if u.Port() == "" {
+		target = net.JoinHostPort(u.Hostname(), "80")
+	}
+
+	// The website expects the short form "GET /path HTTP/1.1", so rewrite the request line.
+	head[0] = method + " " + u.RequestURI() + " " + version + "\r\n"
 
 	// Client toward the target: a second, separate TCP connection (its own handshake, its own 4-tuple).
 	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)

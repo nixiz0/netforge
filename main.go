@@ -22,11 +22,7 @@ func main() {
 		}
 		runDial(addr)
 	case "proxy":
-		target := defaultAddr
-		if len(os.Args) > 2 {
-			target = os.Args[2]
-		}
-		runProxy(target)
+		runProxy()
 	default:
 		usage()
 	}
@@ -36,6 +32,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: netforge <command>")
 	fmt.Fprintln(os.Stderr, "  echo            TCP echo server on "+defaultAddr)
 	fmt.Fprintln(os.Stderr, "  dial [addr]     connect to addr (default "+defaultAddr+"), type to send, replies are printed")
-	fmt.Fprintln(os.Stderr, "  proxy [target]  listen on "+proxyAddr+", relay every client to target (default "+defaultAddr+")")
+	fmt.Fprintln(os.Stderr, "  proxy           HTTP forward proxy on "+proxyAddr)
 	os.Exit(2)
 }
