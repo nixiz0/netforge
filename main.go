@@ -1,40 +1,27 @@
 package main
 
 import (
-	"io"  // general tools for reading and writing (io.Copy, io.EOF)
-	"log" // printing with timestamps
-	"net" // sockets
+	"fmt"
+	"os"
 )
 
-func main() {
-	// socket() + bind() + listen(): the kernel now accepts TCP handshakes on this port.
-	ln, err := net.Listen("tcp", "127.0.0.1:9000") // loopback
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer ln.Close()
-	log.Println("echo server listening on", ln.Addr())
+const defaultAddr = "127.0.0.1:9000" // loopback
 
-	for {
-		// Blocks until the kernel has a fully ESTABLISHED connection in its backlog queue.
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Println("accept:", err)
-			continue
-		}
-		// Handle each client in its own goroutine so the loop goes straight back to Accept().
-		go handle(conn)
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+
+	switch os.Args[1] {
+	case "echo":
+		runEchoServer(defaultAddr)
+	default:
+		usage()
 	}
 }
 
-func handle(conn net.Conn) {
-	defer conn.Close()
-	log.Println("new connection from", conn.RemoteAddr())
-
-	// Read from conn, write back to conn, until the client sends FIN (io.EOF).
-	n, err := io.Copy(conn, conn)
-	if err != nil {
-		log.Println("copy:", err)
-	}
-	log.Printf("%s closed, echoed %d bytes", conn.RemoteAddr(), n)
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: netforge <command>")
+	fmt.Fprintln(os.Stderr, "  echo   TCP echo server on "+defaultAddr)
+	os.Exit(2)
 }
