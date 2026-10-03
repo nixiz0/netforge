@@ -206,7 +206,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "2.4", what: "HTTPS via CONNECT" };
+const SYNC = { step: "3.1", what: "SOCKS5 greeting" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
@@ -217,20 +217,22 @@ const NODES = {
   dial:   { x: 110, y: 400, label: "dial", sub: "internal/dial", script: "internal/dial/dial.go" },
   proxy:  { x: 345, y: 160, label: "proxy", sub: "internal/proxy", port: ":8080", script: "internal/proxy/proxy.go" },
   echo:   { x: 345, y: 290, label: "echo", sub: "internal/echo", port: ":9000", script: "internal/echo/echo.go" },
+  socks:  { x: 110, y: 290, label: "socks", sub: "internal/socks", port: ":1080", script: "internal/socks/socks.go" },
   closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST." },
   router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies." },
   dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start." },
   site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's." },
   void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out." }
 };
-const LINKS = [["term", "proxy", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
+const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
 
 // Go files: shown in the Script card.
 const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
-  "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] }
+  "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
+  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: greeting only)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, then (next step) read the CONNECT request"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"]] }
 };
 
 // Scenarios = what the system can do today. Each step = one packet.
@@ -313,11 +315,23 @@ const SCENARIOS = {
       { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/proxy/proxy.go", c: "io.Copy(upstream, br)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
       { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "internal/proxy/proxy.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
     ]
+  },
+  socks: {
+    name: "SOCKS5 (wip)", blurb: "Step 3.1: the binary greeting. curl and the server agree on \"no authentication\".",
+    run: ["go run ./cmd/netforge socks", "curl.exe --socks5-hostname 127.0.0.1:1080 http://example.com/"], boot: [["socks", "SOCKS5 server listening on 127.0.0.1:1080"]],
+    steps: [
+      { p: ["term", "socks"], t: "ctl", l: "handshake", f: "internal/socks/socks.go", c: "ln.Accept() → go handle(client)", k: "Same TCP as always", s: "SOCKS5 starts like every TCP server: Listen, Accept, one goroutine per client." },
+      { p: ["term", "socks"], t: "data", l: "05 01 00", f: "internal/socks/socks.go", c: "io.ReadFull(conn, head) · io.ReadFull(conn, methods)", k: "Binary, length-prefixed", s: "Version 5, 1 method follows, method 0x00 = no auth. The 2nd byte says how many bytes to read next.",
+        log: [["socks", "127.0.0.1:52360 greeting: 05 01 00"]] },
+      { p: ["socks", "term"], t: "data", l: "05 00", f: "internal/socks/socks.go", c: "conn.Write([]byte{version5, methodNoAuth})", k: "Method chosen", s: "Two bytes: version 5, \"no authentication\". 0xFF would mean none acceptable.",
+        log: [["socks", "127.0.0.1:52360 greeting done, no authentication"]] },
+      { p: ["socks", "term"], t: "ctl", l: "FIN", f: "internal/socks/socks.go", c: "defer client.Close()", k: "Not finished yet", s: "curl now sends its CONNECT request, but reading it is step 3.2, so the server closes." }
+    ]
   }
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "next"], ["UDP"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
-const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e" };
+const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2" };
 
 /* =================== engine =================== */
 const $ = (s) => document.querySelector(s);

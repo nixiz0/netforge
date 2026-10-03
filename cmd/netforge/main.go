@@ -8,6 +8,7 @@ import (
 	"github.com/nixiz0/netforge-go/internal/dial"
 	"github.com/nixiz0/netforge-go/internal/echo"
 	"github.com/nixiz0/netforge-go/internal/proxy"
+	"github.com/nixiz0/netforge-go/internal/socks"
 )
 
 const defaultAddr = "127.0.0.1:9000" // loopback
@@ -29,6 +30,8 @@ func main() {
 		err = dial.Run(addr)
 	case "proxy":
 		err = proxy.Run()
+	case "socks":
+		err = socks.Run()
 	default:
 		usage()
 	}
@@ -44,5 +47,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  echo            TCP echo server on "+defaultAddr)
 	fmt.Fprintln(os.Stderr, "  dial [addr]     connect to addr (default "+defaultAddr+"), type to send, replies are printed")
 	fmt.Fprintln(os.Stderr, "  proxy           HTTP forward proxy on "+proxy.Addr)
+	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (in progress: greeting only)")
 	os.Exit(2)
 }

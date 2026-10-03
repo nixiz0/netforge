@@ -22,6 +22,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/echo/` | TCP echo server on `127.0.0.1:9000` | `echo.Run(addr)` |
 | `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
+| `internal/socks/` | SOCKS5 server on `socks.Addr` (`127.0.0.1:1080`), in progress: greeting only | `socks.Run()` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 
 Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not import each other yet. When a helper is needed by two features (e.g. the two-way `relay`), move it to its own `internal/<name>` package instead of importing a sibling feature.
@@ -57,6 +58,7 @@ Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not
 
 - Each feature package exports only what `main` needs (`Run`, sometimes a constant like `proxy.Addr`); everything else stays lowercase (unexported). Exported names get a doc comment starting with the name.
 - Comments describe the **network event** a line causes (SYN, FIN, EOF, framing), not the Go syntax.
+- Binary protocols (SOCKS5, later the tunnel): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.
 - Every change keeps three things in sync in the same commit: the code, the README (`Now`, roadmap checkboxes, CLI `Available`/`Planned`), and `docs/blueprint.html`.
