@@ -25,6 +25,6 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: netforge <command>")
 	fmt.Fprintln(os.Stderr, "  echo   TCP echo server on "+defaultAddr)
-	fmt.Fprintln(os.Stderr, "  dial   connect to "+defaultAddr+", send one message, print the reply")
+	fmt.Fprintln(os.Stderr, "  dial   connect to "+defaultAddr+", send two messages, read them back line by line")
 	os.Exit(2)
 }
