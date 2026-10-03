@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Netforge Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen network console. Header = scenario + layer filters + roadmap.
+   Center = live network map (SVG, packets moving). Right = now / script / terminal. Bottom = timeline.
+   Single dark world on purpose (owner's brand: black, gold, icy silver). */
+:root {
+  color-scheme: dark;
+  --bg: #0a0b0f;
+  --bg-2: #11131a;
+  --bg-3: #181b25;
+  --line: #252a38;
+  --line-2: #343a4e;
+  --fg: #f3f4f8;
+  --muted: #959bb1;
+  --dim: #5f6579;
+  --gold: #d6a740;
+  --gold-hi: #f4d47e;
+  --gold-lo: #8a6420;
+  --ice: #b8c1e8;
+  --ice-lo: #6c76a8;
+  --ink: #15110a;
+  --t-ctl: #b8c1e8;
+  --t-dns: #8fd3c9;
+  --t-data: #f3f4f8;
+  --t-tls: #f4d47e;
+  --t-lost: #e07a7a;
+  --font-display: "Lexend", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: radial-gradient(800px 500px at 10% -10%, rgba(214,167,64,.09), transparent 60%),
+              radial-gradient(900px 600px at 100% 0%, rgba(108,118,168,.14), transparent 60%), var(--bg);
+  color: var(--fg);
+  font: 300 14px/1.5 var(--font-display);
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 2px; border-radius: 6px; }
+code, .mono { font-family: var(--font-mono); }
+
+.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+
+/* ---------- header ---------- */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: rgba(10,11,15,.7); }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 17px; letter-spacing: .01em; margin-right: 6px; }
+.brand svg { width: 30px; height: 30px; }
+.brand small { font-weight: 400; font-size: 11px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--line-2); border-radius: 11px; background: var(--bg-2); }
+.seg button { border: 0; background: none; padding: 6px 11px; border-radius: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: linear-gradient(135deg, var(--gold-hi), var(--gold)); color: var(--ink); font-weight: 600; }
+.layers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.layers .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.lay { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-2); font-size: 12px; color: var(--muted); }
+.lay i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.lay[aria-pressed="false"] { opacity: .4; text-decoration: line-through; }
+.road { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.bars { display: flex; gap: 3px; }
+.bars span { width: 14px; height: 6px; border-radius: 3px; background: var(--line-2); }
+.bars span.done { background: var(--gold); }
+.bars span.next { background: var(--ice); }
+
+/* ---------- main ---------- */
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px 16px; min-height: 0; }
+.mapbox { position: relative; min-height: 0; border: 1px solid var(--line-2); border-radius: 16px; overflow: hidden;
+  background-color: var(--bg-2);
+  background-image: radial-gradient(rgba(184,193,232,.07) 1px, transparent 1px); background-size: 22px 22px; }
+.mapbox svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cap-t { fill: var(--fg); font: 800 20px var(--font-display); }
+.cap-s { fill: var(--muted); font: 300 13px var(--font-display); }
+.leg { fill: var(--muted); font: 400 11px var(--font-display); }
+
+.zone { fill: rgba(10,11,15,.35); stroke: var(--line-2); stroke-dasharray: 5 6; }
+.zone-t { fill: var(--dim); font: 600 11px var(--font-display); letter-spacing: .14em; text-transform: uppercase; }
+.zone-s { fill: var(--dim); font: 400 11px var(--font-mono); }
+.link { stroke: var(--line-2); stroke-width: 1.5; }
+.link.loop { stroke-dasharray: 4 5; }
+.link.on { stroke: var(--ice-lo); stroke-width: 2; }
+.hot { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 10 8; animation: flow .8s linear infinite; opacity: .9; }
+@keyframes flow { to { stroke-dashoffset: -18; } }
+.node { cursor: pointer; transition: opacity .25s; }
+.node rect.card { fill: var(--bg-3); stroke: var(--line-2); stroke-width: 1.2; }
+.node.off { opacity: .22; }
+.node.act rect.card { stroke: var(--gold); stroke-width: 2; filter: drop-shadow(0 0 10px rgba(214,167,64,.35)); }
+.node.pin rect.card { stroke: var(--ice); stroke-width: 2; }
+.node:hover rect.card { stroke: var(--ice); }
+.node .nl { fill: var(--fg); font: 600 14px var(--font-display); }
+.node .ns { fill: var(--muted); font: 400 11px var(--font-mono); }
+.node .ns.script { fill: var(--gold-hi); }
+.node .np { fill: var(--gold-hi); font: 600 11px var(--font-mono); text-anchor: end; }
+.node .dot { stroke: none; }
+.pkt rect { stroke-width: 1.5; }
+.pkt text { font: 600 12px var(--font-mono); text-anchor: middle; fill: var(--ink); }
+.pulse { fill: none; stroke: var(--t-lost); stroke-width: 2; }
+
+/* ---------- side ---------- */
+.side { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.card { border: 1px solid var(--line-2); border-radius: 14px; background: var(--bg-2); padding: 12px 14px; }
+.hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.kick { font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.cnt { font: 400 12px var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.pl { font: 600 17px var(--font-mono); color: var(--fg); overflow-wrap: anywhere; margin: 2px 0; }
+.route { font: 400 12px var(--font-mono); color: var(--ice); margin-bottom: 8px; }
+.concept { border-left: 2px solid var(--gold); padding-left: 10px; margin-bottom: 8px; }
+.concept b { display: block; font-weight: 600; font-size: 13px; color: var(--gold-hi); }
+.concept span { color: var(--fg); font-size: 13px; }
+.where { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.where code { font-size: 11.5px; color: var(--gold-hi); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 7px; overflow-wrap: anywhere; }
+.chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--gold-lo); background: rgba(214,167,64,.08); color: var(--gold-hi); }
+.sc h3 { margin: 0; font: 600 15px var(--font-mono); color: var(--gold-hi); }
+.sc p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+.fns { display: grid; gap: 4px; }
+.fns div { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 10px; font-size: 12px; align-items: baseline; }
+.fns code { color: var(--fg); white-space: nowrap; }
+.fns span { color: var(--muted); }
+.fns div.hit code { color: var(--gold-hi); }
+.term { flex: 1; min-height: 110px; display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 14px; background: #06070a; overflow: hidden; }
+.term .hd { padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--line); }
+.copy { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--bg-3); color: var(--muted); }
+.lines { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 12px; font: 400 11.5px/1.55 var(--font-mono); }
+.lines div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lines .cmd { color: var(--fg); } .lines .cmd::before { content: "> "; color: var(--gold); }
+.lines .who { display: inline-block; min-width: 46px; color: var(--c); }
+.lines .new { animation: fadein .4s; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+/* ---------- bottom ---------- */
+.bottom { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 16px 12px; border-top: 1px solid var(--line); }
+.ctrls { display: flex; gap: 6px; align-items: center; }
+.ctrl { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg-2); display: grid; place-items: center; }
+.ctrl svg { width: 14px; height: 14px; fill: var(--fg); }
+.ctrl.play { background: linear-gradient(135deg, var(--gold-hi), var(--gold)); border-color: transparent; }
+.ctrl.play svg { fill: var(--ink); }
+.speed { display: flex; border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; margin-left: 4px; }
+.speed button { border: 0; background: var(--bg-2); padding: 6px 8px; font: 400 11px var(--font-mono); color: var(--muted); }
+.speed button[aria-pressed="true"] { background: var(--bg-3); color: var(--gold-hi); }
+.tl { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.st { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--bg-2); font: 400 12px var(--font-mono); color: var(--muted); white-space: nowrap; }
+.st i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.st.done { color: var(--fg); }
+.st.cur { border-color: var(--gold); color: var(--gold-hi); background: rgba(214,167,64,.10); }
+.st.skip { opacity: .3; text-decoration: line-through; }
+
+/* ---------- small screens: let the page scroll and stack ---------- */
+@media (max-width: 900px), (max-height: 600px) {
+  body { overflow: auto; }
+  .app { height: auto; }
+  .main { grid-template-columns: 1fr; }
+  .mapbox { height: 62vh; min-height: 380px; }
+  .road { margin-left: 0; }
+  .term { min-height: 200px; }
+}
+@media (max-width: 560px) { .bottom { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .hot { animation: none; } .lines .new { animation: none; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4d47e"/><stop offset=".6" stop-color="#d6a740"/><stop offset="1" stop-color="#8a6420"/></linearGradient></defs><rect x="1" y="1" width="38" height="38" rx="10" fill="#11131a" stroke="url(#gb)" stroke-width="1.5"/><path d="M9 12 H31 L20 31 Z" fill="#050506" stroke="url(#gb)" stroke-width="2.2" stroke-linejoin="round"/></svg>
+      <span>Netforge <small>blueprint</small></span>
+    </div>
+    <nav class="seg" id="scen" aria-label="What the system can do"></nav>
+    <div class="layers" id="layers"><span class="lbl">Show</span></div>
+    <div class="road" id="road"></div>
+  </header>
+
+  <main class="main">
+    <div class="mapbox">
+      <svg id="map" viewBox="0 0 1000 610" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Network map"></svg>
+    </div>
+    <aside class="side">
+      <section class="card" id="now" aria-live="polite"></section>
+      <section class="card sc" id="script"></section>
+      <section class="term">
+        <div class="hd"><span class="kick">Terminal</span><button class="copy" id="copyCmd">Copy commands</button></div>
+        <div class="lines" id="lines"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="bottom">
+    <div class="ctrls">
+      <button class="ctrl" id="prev" aria-label="Previous packet"><svg viewBox="0 0 24 24"><path d="M15 5 L7 12 L15 19 z"/></svg></button>
+      <button class="ctrl play" id="play" aria-label="Play"></button>
+      <button class="ctrl" id="next" aria-label="Next packet"><svg viewBox="0 0 24 24"><path d="M9 5 L17 12 L9 19 z"/></svg></button>
+      <div class="speed" id="speed"></div>
+    </div>
+    <div class="tl" id="tl"></div>
+  </footer>
+</div>
+
+<script>
+/* =================== DATA: keep in sync with the repo at every step =================== */
+const SYNC = { step: "2.4", what: "HTTPS via CONNECT" };
+
+// Packet layers (filters). "lost" packets count as TCP control.
+const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
+
+// Map nodes (viewBox 1000x580). `script` = Go file that runs there.
+const NODES = {
+  term:   { x: 110, y: 160, label: "curl.exe", sub: "any HTTP client", info: "An app told to use the proxy: curl -x, or a browser. Not our code." },
+  dial:   { x: 110, y: 400, label: "dial", sub: "dial.go", script: "dial.go" },
+  proxy:  { x: 345, y: 160, label: "proxy", sub: "proxy.go", port: ":8080", script: "proxy.go" },
+  echo:   { x: 345, y: 290, label: "echo", sub: "echo.go", port: ":9000", script: "echo.go" },
+  closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST." },
+  router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies." },
+  dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start." },
+  site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's." },
+  void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out." }
+};
+const LINKS = [["term", "proxy", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
+
+// Go files: shown in the Script card.
+const FILES = {
+  "main.go":  { role: "Command router", cmd: "go run .", fns: [["main()", "Reads os.Args[1], calls the right run* function"], ["usage()", "Prints help, exits 2"]] },
+  "echo.go":  { role: "Echo server on 127.0.0.1:9000", cmd: "go run . echo", fns: [["runEchoServer(addr)", "Listen, Accept forever, one goroutine per client"], ["handleEcho(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
+  "dial.go":  { role: "Interactive TCP client (mini netcat)", cmd: "go run . dial [addr]", fns: [["runDial(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
+  "proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run . proxy", fns: [["runProxy()", "Listen, Accept, go handleProxy"], ["handleProxy(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] }
+};
+
+// Scenarios = what the system can do today. Each step = one packet.
+// p: path of node ids · t: layer · l: label · f: Go file · c: Go code · k: network concept · s: one line · log: [[program, text]]
+const SCENARIOS = {
+  echo: {
+    name: "Echo", blurb: "Your own client and server talk over loopback, then close cleanly.",
+    run: ["go run . echo", "go run . dial"], boot: [["echo", "echo server listening on 127.0.0.1:9000"]],
+    steps: [
+      { p: ["dial", "echo"], t: "ctl", l: "SYN", f: "dial.go", c: "net.DialTimeout(\"tcp\", addr, 5*time.Second)", k: "Handshake 1/3", s: "The client's kernel opens from an ephemeral port (52341)." },
+      { p: ["echo", "dial"], t: "ctl", l: "SYN-ACK", f: "echo.go", c: "kernel, no Go code runs", k: "Handshake 2/3", s: "The server's kernel answers by itself, from the listen backlog." },
+      { p: ["dial", "echo"], t: "ctl", l: "ACK", f: "echo.go", c: "ln.Accept() → go handleEcho(conn)", k: "Handshake 3/3 · ESTABLISHED", s: "Accept() returns the connection. One goroutine per client.",
+        log: [["dial", "connected 127.0.0.1:52341 -> 127.0.0.1:9000"], ["echo", "new connection from 127.0.0.1:52341"]] },
+      { p: ["dial", "echo"], t: "data", l: "\"hello\\n\"", f: "dial.go", c: "io.Copy(conn, os.Stdin)", k: "Byte stream", s: "6 bytes leave. TCP keeps the order, not message boundaries." },
+      { p: ["echo", "dial"], t: "data", l: "\"hello\\n\"", f: "echo.go", c: "io.Copy(conn, conn)", k: "Full-duplex", s: "The server writes back what it reads, on the same connection.", log: [["dial", "hello"]] },
+      { p: ["dial", "echo"], t: "ctl", l: "FIN", f: "dial.go", c: "conn.(*net.TCPConn).CloseWrite()", k: "Half-close", s: "Ctrl+Z closes one direction. The client keeps reading.", log: [["dial", "stdin closed, sending FIN"]] },
+      { p: ["echo", "dial"], t: "ctl", l: "FIN", f: "echo.go", c: "defer conn.Close()", k: "Graceful close · TIME_WAIT", s: "EOF ends io.Copy and the server closes. The client closed first, so it waits in TIME_WAIT.",
+        log: [["echo", "127.0.0.1:52341 closed, echoed 6 bytes"], ["dial", "server closed the connection"]] }
+    ]
+  },
+  web: {
+    name: "Dial a site", blurb: "dial talks raw HTTP to a real web server: DNS, NAT, then plain text over TCP.",
+    run: ["go run . dial example.com:80"], boot: [],
+    steps: [
+      { p: ["dial", "router", "dns"], t: "dns", l: "A? example.com", f: "dial.go", c: "net.DialTimeout(\"tcp\", \"example.com:80\", 5s)", k: "DNS lookup", s: "A name is not an address. Go asks DNS first, over UDP port 53." },
+      { p: ["dns", "router", "dial"], t: "dns", l: "203.0.113.10", f: "dial.go", c: "Go's resolver", k: "DNS answer", s: "Now TCP has an IP to target." },
+      { p: ["dial", "router", "site"], t: "ctl", l: "SYN", f: "dial.go", c: "net.DialTimeout(...)", k: "Handshake through NAT", s: "The router rewrites 192.168.1.20 to your public IP on the way out." },
+      { p: ["site", "router", "dial"], t: "ctl", l: "SYN-ACK", f: "dial.go", c: "kernel", k: "NAT state", s: "The router remembers the mapping and lets the reply back in." },
+      { p: ["dial", "router", "site"], t: "ctl", l: "ACK", f: "dial.go", c: "net.DialTimeout returns conn", k: "ESTABLISHED", s: "Same handshake as on loopback, over real links.", log: [["dial", "connected 192.168.1.20:52344 -> 203.0.113.10:80"]] },
+      { p: ["dial", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "dial.go", c: "io.Copy(conn, os.Stdin)", k: "HTTP is text over TCP", s: "You type a request line, a Host header, then an empty line." },
+      { p: ["site", "router", "dial"], t: "data", l: "200 OK + HTML", f: "dial.go", c: "io.Copy(os.Stdout, conn)", k: "HTTP response", s: "Status line, headers, empty line, body.", log: [["dial", "HTTP/1.1 200 OK  …headers…  <!doctype html>…"]] },
+      { p: ["site", "router", "dial"], t: "ctl", l: "FIN", f: "dial.go", c: "io.Copy returns → main exits", k: "Server closes first", s: "Connection: close. The server's FIN ends the client.", log: [["dial", "server closed the connection"]] }
+    ]
+  },
+  fail: {
+    name: "Dial fails", blurb: "Two ways a connection fails: refused (RST) and timeout (silence).",
+    run: ["go run . dial 127.0.0.1:9001", "go run . dial 10.255.255.1:80"], boot: [],
+    steps: [
+      { p: ["dial", "closed"], t: "ctl", l: "SYN :9001", f: "dial.go", c: "net.DialTimeout(...)", k: "Port closed", s: "The host is up, but no program listens on 9001." },
+      { p: ["closed", "dial"], t: "ctl", l: "RST", f: "dial.go", c: "log.Fatal(err)", k: "Refused = RST", s: "The kernel resets at once. Network fine, port wrong.",
+        log: [["dial", "dial tcp 127.0.0.1:9001: connectex: … actively refused it."]] },
+      { p: ["dial", "router", "void"], t: "lost", l: "SYN", f: "dial.go", c: "net.DialTimeout(..., 5*time.Second)", k: "No answer", s: "The SYN leaves and nothing comes back." },
+      { p: ["dial", "router", "void"], t: "lost", l: "SYN retry", f: "dial.go", c: "kernel retransmits", k: "Retransmission", s: "The kernel resends the SYN with growing delays." },
+      { p: ["dial"], t: "lost", l: "5 s timeout", f: "dial.go", c: "5*time.Second", k: "Timeout = silence", s: "Go gives up: host down, no route, or a firewall dropping packets.",
+        log: [["dial", "dial tcp 10.255.255.1:80: i/o timeout"]] }
+    ]
+  },
+  http: {
+    name: "HTTP proxy", blurb: "curl → proxy → site. Two separate TCP connections; the proxy reads and rewrites the request.",
+    run: ["go run . proxy", "curl.exe -x http://127.0.0.1:8080 http://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
+    steps: [
+      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "proxy.go", c: "ln.Accept() → go handleProxy(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
+      { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "proxy.go", c: "readHead(br)", k: "Absolute-form request", s: "Through a proxy, the request line carries the full URL.",
+        log: [["proxy", "127.0.0.1:52350 request line: \"GET http://example.com/ HTTP/1.1\\r\\n\""]] },
+      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "proxy.go", c: "url.Parse(rawURL) → example.com:80", k: "Target from the URL", s: "No port in the URL means 80. Then a DNS lookup." },
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "proxy.go", c: "Go's resolver", k: "DNS answer", s: "The proxy resolves the name, not curl." },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "proxy.go", c: "net.DialTimeout(\"tcp\", target, 5s)", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
+        log: [["proxy", "127.0.0.1:52350 -> proxy -> 203.0.113.10:80"]] },
+      { p: ["proxy", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "proxy.go", c: "head[0] = method + \" \" + u.RequestURI() + …", k: "Origin-form rewrite", s: "The site expects only the path." },
+      { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
+      { p: ["proxy", "term"], t: "data", l: "200 OK + HTML", f: "proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "…and is copied unchanged onto connection 1." },
+      { p: ["site", "router", "proxy"], t: "ctl", l: "FIN", f: "proxy.go", c: "io.Copy returns", k: "Close propagates", s: "The site closes connection 2." },
+      { p: ["proxy", "term"], t: "ctl", l: "FIN", f: "proxy.go", c: "defer client.Close()", k: "Close propagates", s: "The proxy closes connection 1.", log: [["proxy", "127.0.0.1:52350 closed"]] }
+    ]
+  },
+  https: {
+    name: "HTTPS CONNECT", blurb: "curl asks for a tunnel, then TLS runs end to end. The proxy becomes a blind pipe.",
+    run: ["go run . proxy", "curl.exe -x http://127.0.0.1:8080 https://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
+    steps: [
+      { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "proxy.go", c: "ln.Accept() → go handleProxy(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
+      { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT", s: "Only host:port travels in clear text.",
+        log: [["proxy", "127.0.0.1:52351 request line: \"CONNECT example.com:443 HTTP/1.1\\r\\n\""]] },
+      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "DNS lookup", s: "The proxy resolves the name." },
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "proxy.go", c: "Go's resolver", k: "DNS answer", s: "Now it can connect to port 443." },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
+        log: [["proxy", "127.0.0.1:52351 -> proxy -> 203.0.113.10:443 (CONNECT tunnel)"]] },
+      { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "proxy.go", c: "relay(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "proxy.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "proxy.go", c: "io.Copy(upstream, br)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "proxy.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
+    ]
+  }
+};
+
+const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "next"], ["UDP"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
+const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e" };
+
+/* =================== engine =================== */
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const kv = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const color = (t) => getComputedStyle(document.documentElement).getPropertyValue("--t-" + t).trim();
+const ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M7 5 L19 12 L7 19 z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>';
+
+const S = {
+  scen: SCENARIOS[kv("nf-scen")] ? kv("nf-scen") : "https",
+  idx: 0, t: 0, hold: 0, arrived: false, ending: false,
+  playing: !reduce, speed: 1, pinned: null, logs: [],
+  layers: { ctl: true, dns: true, data: true, tls: true }
+};
+const SC = () => SCENARIOS[S.scen];
+const cur = () => SC().steps[S.idx];
+const layerOf = (st) => (st.t === "lost" ? "ctl" : st.t);
+const visible = (st) => S.layers[layerOf(st)];
+const nextVisible = (from) => { const st = SC().steps; for (let j = from + 1; j < st.length; j++) if (visible(st[j])) return j; return -1; };
+const prevVisible = (from) => { const st = SC().steps; for (let j = from - 1; j >= 0; j--) if (visible(st[j])) return j; return -1; };
+const scenNodes = () => new Set(SC().steps.flatMap((s) => s.p));
+
+/* ---------- header ---------- */
+function renderHeader() {
+  $("#scen").innerHTML = Object.entries(SCENARIOS).map(([k, s]) =>
+    `<button data-k="${k}" aria-pressed="${k === S.scen}">${esc(s.name)}</button>`).join("");
+  $("#scen").querySelectorAll("button").forEach((b) => b.onclick = () => { S.scen = b.dataset.k; kv("nf-scen", S.scen); S.pinned = null; startScenario(); renderHeader(); });
+  $("#layers").innerHTML = '<span class="lbl">Show</span>' + Object.entries(LAYERS).map(([k, n]) =>
+    `<button class="lay" data-l="${k}" aria-pressed="${S.layers[k]}" style="--c:var(--t-${k})"><i></i>${n}</button>`).join("");
+  $("#layers").querySelectorAll(".lay").forEach((b) => b.onclick = () => {
+    S.layers[b.dataset.l] = !S.layers[b.dataset.l]; renderHeader();
+    if (!visible(cur())) { const j = nextVisible(S.idx); j >= 0 ? setStep(j, false) : startScenario(); } else { renderTimeline(); }
+  });
+  const done = ROADMAP.filter((r) => r[1] === "done").length, next = ROADMAP.find((r) => r[1] === "next");
+  $("#road").innerHTML = `<span class="bars">${ROADMAP.map((r, i) => `<span class="${r[1] || ""}" title="${i + 1} · ${esc(r[0])}"></span>`).join("")}</span>
+    <span>${done}/9 · step ${SYNC.step}${next ? " · next " + esc(next[0]) : ""}</span>`;
+}
+
+/* ---------- map ---------- */
+const NW = 180, NH = 60;
+function renderMap() {
+  const on = scenNodes(), st = cur(), sc = SC();
+  let s = `<text class="cap-t" x="20" y="30">${esc(sc.name)}</text><text class="cap-s" x="20" y="50">${esc(sc.blurb)}</text>
+    <rect class="zone" x="18" y="62" width="520" height="500" rx="18"/>
+    <text class="zone-t" x="38" y="88">Your PC</text><text class="zone-s" x="38" y="106">192.168.1.20 · loopback 127.0.0.1</text>
+    <rect class="zone" x="728" y="62" width="258" height="500" rx="18"/>
+    <text class="zone-t" x="748" y="88">Internet</text>`;
+  LINKS.forEach(([a, b, loop]) => {
+    const A = NODES[a], B = NODES[b], used = on.has(a) && on.has(b);
+    s += `<line class="link ${loop ? "loop" : ""} ${used ? "on" : ""}" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"/>`;
+  });
+  if (st && st.p.length > 1)
+    s +=`<polyline class="hot" stroke="${color(st.t)}" points="${st.p.map((id) => NODES[id].x + "," + NODES[id].y).join(" ")}"/>`;
+  Object.entries(NODES).forEach(([id, n]) => {
+    const act = st && (st.p[0] === id || st.p[st.p.length - 1] === id);
+    const cls = ["node", on.has(id) ? "" : "off", act ? "act" : "", S.pinned === id ? "pin" : ""].join(" ");
+    const x = n.x - NW / 2, y = n.y - NH / 2;
+    s += `<g class="${cls}" data-id="${id}" tabindex="0" role="button" aria-label="${esc(n.label)}"><title>${esc(n.info || FILES[n.script]?.role || "")}</title>
+      <rect class="card" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="12"/>
+      <circle class="dot" cx="${x + 16}" cy="${y + 22}" r="4" style="fill:${n.script ? "var(--gold)" : "var(--ice-lo)"}"/>
+      <text class="nl" x="${x + 28}" y="${y + 27}">${esc(n.label)}</text>
+      <text class="ns ${n.script ? "script" : ""}" x="${x + 16}" y="${y + 47}">${esc(n.sub)}</text>
+      ${n.port ? `<text class="np" x="${x + NW - 12}" y="${y + 47}">${esc(n.port)}</text>` : ""}</g>`;
+  });
+  let lx = 20;
+  Object.entries({ ...LAYERS, lost: "No answer" }).forEach(([k, n]) => {
+    s += `<rect x="${lx}" y="583" width="16" height="4" rx="2" style="fill:var(--t-${k})"/><text class="leg" x="${lx + 22}" y="589">${n}</text>`;
+    lx += 34 + n.length * 6.6;
+  });
+  s += `<g id="pkt" class="pkt"><rect rx="11" height="22" y="-11"/><text y="4"></text></g><circle id="pulse" class="pulse" r="0"/><g id="lostx"></g>`;
+  $("#map").innerHTML = s;
+  $("#map").querySelectorAll(".node").forEach((g) => {
+    const pick = () => { S.pinned = S.pinned === g.dataset.id ? null : g.dataset.id; if (S.pinned) setPlaying(false); renderMap(); renderScript(); };
+    g.onclick = pick; g.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+  });
+  pktKey = "";
+}
+
+/* ---------- packet animation ---------- */
+let pktKey = "";
+function pathPts(st) {
+  const pts = st.p.map((id) => [NODES[id].x, NODES[id].y]);
+  if (st.t === "lost" && pts.length > 1) { const a = pts[pts.length - 2], b = pts[pts.length - 1]; pts[pts.length - 1] = [a[0] + (b[0] - a[0]) * .62, a[1] + (b[1] - a[1]) * .62]; }
+  return pts;
+}
+function pointAt(pts, t) {
+  const seg = []; let L = 0;
+  for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(d); L += d; }
+  const trim = Math.min(44, L * .2); let d = trim + (L - 2 * trim) * t;
+  for (let i = 0; i < seg.length; i++) {
+    if (d <= seg[i] || i === seg.length - 1) { const r = seg[i] ? Math.min(1, d / seg[i]) : 0; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * r, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * r]; }
+    d -= seg[i];
+  }
+  return pts[0];
+}
+function drawPacket() {
+  const st = cur(), g = $("#pkt"), pulse = $("#pulse"), lx = $("#lostx");
+  if (!st || !g) return;
+  const key = S.scen + S.idx;
+  if (key !== pktKey) {
+    pktKey = key;
+    const w = st.l.length * 7.4 + 22, c = color(st.t);
+    g.querySelector("rect").setAttribute("width", w); g.querySelector("rect").setAttribute("x", -w / 2);
+    g.querySelector("rect").setAttribute("fill", c); g.querySelector("rect").setAttribute("stroke", c);
+    g.querySelector("text").textContent = st.l;
+  }
+  if (st.p.length === 1) {
+    const n = NODES[st.p[0]]; g.setAttribute("transform", `translate(${n.x},${n.y - NH / 2 - 18})`);
+    pulse.setAttribute("cx", n.x); pulse.setAttribute("cy", n.y);
+    pulse.setAttribute("r", 40 + 50 * S.t); pulse.setAttribute("opacity", 1 - S.t * .8);
+  } else {
+    pulse.setAttribute("r", 0);
+    const [x, y] = pointAt(pathPts(st), S.t); g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+  }
+  g.setAttribute("opacity", st.t === "lost" && S.arrived && st.p.length > 1 ? .35 : 1);
+  if (st.t === "lost" && S.arrived && st.p.length > 1) {
+    const p = pathPts(st), [x, y] = p[p.length - 1];
+    lx.innerHTML = `<path d="M${x - 9} ${y - 9} L${x + 9} ${y + 9} M${x + 9} ${y - 9} L${x - 9} ${y + 9}" style="stroke:var(--t-lost)" stroke-width="3" stroke-linecap="round"/>`;
+  } else lx.innerHTML = "";
+}
+
+/* ---------- side panels ---------- */
+function renderNow() {
+  const st = cur(), steps = SC().steps;
+  if (!st) { $("#now").innerHTML = '<div class="kick">Now</div><p>All layers are hidden. Turn one back on above.</p>'; return; }
+  const from = NODES[st.p[0]], to = NODES[st.p[st.p.length - 1]];
+  const route = st.p.length === 1 ? from.label : `${from.label}${from.port ? " " + from.port : ""}  →  ${to.label}${to.port ? " " + to.port : ""}`;
+  $("#now").innerHTML = `
+    <div class="hd"><span class="kick">Now</span><span class="pill" style="--c:var(--t-${st.t})"><i></i>${st.t === "lost" ? "No answer" : LAYERS[st.t]}</span><span class="cnt">${S.idx + 1}/${steps.length}</span></div>
+    <div class="pl">${esc(st.l)}</div>
+    <div class="route">${esc(route)}</div>
+    <div class="concept"><b>${esc(st.k)}</b><span>${esc(st.s)}</span></div>
+    <div class="where"><button class="chip" data-f="${st.f}">${st.f}</button><code>${esc(st.c)}</code></div>`;
+  $("#now .chip").onclick = () => { S.pinned = Object.keys(NODES).find((id) => NODES[id].script === st.f) || null; setPlaying(false); renderMap(); renderScript(); };
+}
+function renderScript() {
+  const st = cur();
+  const node = S.pinned ? NODES[S.pinned] : null;
+  if (node && !node.script) {
+    $("#script").innerHTML = `<div class="hd"><span class="kick">On the map</span></div><h3>${esc(node.label)}${node.port ? " " + esc(node.port) : ""}</h3><p>${esc(node.info)}</p>`;
+    return;
+  }
+  const file = node ? node.script : st ? st.f : "main.go", f = FILES[file];
+  $("#script").innerHTML = `<div class="hd"><span class="kick">Script</span><span class="cnt">${esc(f.cmd)}</span></div>
+    <h3>${file}</h3><p>${esc(f.role)}</p>
+    <div class="fns">${f.fns.map(([n, d]) => `<div class="${st && !node && st.c.includes(n.split("(")[0]) ? "hit" : ""}"><code>${esc(n)}</code><span>${esc(d)}</span></div>`).join("")}</div>`;
+}
+function pushLog(who, text, fresh) { S.logs.push({ who, text, fresh }); if (S.logs.length > 40) S.logs.shift(); }
+function renderLogs() {
+  $("#lines").innerHTML = S.logs.map((l) => l.who === ">" ? `<div class="cmd ${l.fresh ? "new" : ""}">${esc(l.text)}</div>`
+    : `<div class="${l.fresh ? "new" : ""}"><span class="who" style="--c:${WHO[l.who] || "var(--muted)"}">${l.who}</span>${esc(l.text)}</div>`).join("");
+  S.logs.forEach((l) => (l.fresh = false));
+}
+function rebuildLogs(upto) {
+  S.logs = []; SC().run.forEach((c) => pushLog(">", c)); SC().boot.forEach(([w, t]) => pushLog(w, t));
+  SC().steps.forEach((st, i) => { if (i <= upto) (st.log || []).forEach(([w, t]) => pushLog(w, t)); });
+  renderLogs();
+}
+
+/* ---------- timeline + controls ---------- */
+function renderTimeline() {
+  $("#tl").innerHTML = SC().steps.map((st, i) =>
+    `<button class="st ${i === S.idx ? "cur" : i < S.idx ? "done" : ""} ${visible(st) ? "" : "skip"}" data-i="${i}" style="--c:var(--t-${st.t})"><i></i>${esc(st.l)}</button>`).join("");
+  $("#tl").querySelectorAll(".st").forEach((b) => b.onclick = () => { const i = +b.dataset.i; if (!visible(SC().steps[i])) return; setPlaying(false); setStep(i, true); });
+  const c = $("#tl .cur"), tl = $("#tl");
+  if (c) tl.scrollLeft = c.offsetLeft - tl.offsetLeft - tl.clientWidth / 2 + c.offsetWidth / 2;
+}
+function setPlaying(p) { S.playing = p; $("#play").innerHTML = p ? ICON_PAUSE : ICON_PLAY; $("#play").setAttribute("aria-label", p ? "Pause" : "Play"); }
+$("#speed").innerHTML = [0.5, 1, 2].map((v) => `<button data-v="${v}" aria-pressed="${v === S.speed}">${v}×</button>`).join("");
+$("#speed").querySelectorAll("button").forEach((b) => b.onclick = () => { S.speed = +b.dataset.v; $("#speed").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); });
+$("#play").onclick = () => { if (S.ending || (S.arrived && nextVisible(S.idx) < 0)) startScenario(); S.pinned = null; setPlaying(!S.playing); renderMap(); renderScript(); };
+$("#next").onclick = () => { setPlaying(false); const j = nextVisible(S.idx); if (j >= 0) setStep(j, true); };
+$("#prev").onclick = () => { setPlaying(false); const j = prevVisible(S.idx); if (j >= 0) setStep(j, true); };
+$("#copyCmd").onclick = (e) => {
+  const btn = e.currentTarget, text = SC().run.join("\n");
+  const ok = () => { btn.textContent = "Copied"; setTimeout(() => (btn.textContent = "Copy commands"), 1200); };
+  try { navigator.clipboard.writeText(text).then(ok, () => (btn.textContent = "Select in terminal")); } catch (err) { btn.textContent = "Select in terminal"; }
+};
+addEventListener("keydown", (e) => {
+  if (e.target.closest("input, textarea")) return;
+  if (e.key === "ArrowRight") $("#next").click();
+  if (e.key === "ArrowLeft") $("#prev").click();
+  if (e.key === " " && !e.target.closest("button, [role=button]")) { e.preventDefault(); $("#play").click(); }
+});
+
+function setStep(j, arrived) {
+  S.idx = j; S.t = arrived ? 1 : 0; S.arrived = arrived; S.hold = 0; S.ending = false;
+  rebuildLogs(arrived ? j : j - 1);
+  renderMap(); renderNow(); renderScript(); renderTimeline(); drawPacket();
+}
+function startScenario() {
+  const j = nextVisible(-1);
+  S.pinned = null; S.ending = false; S.hold = 0;
+  if (j < 0) { S.idx = 0; rebuildLogs(-1); renderMap(); renderNow(); renderScript(); renderTimeline(); return; }
+  setStep(j, reduce);
+}
+function arrive() {
+  S.arrived = true;
+  (cur().log || []).forEach(([w, t]) => pushLog(w, t, true));
+  renderLogs();
+}
+const dur = (st) => (st.p.length === 1 ? 900 : 420 + 360 * (st.p.length - 1)) / S.speed;
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(64, now - last); last = now;
+  const st = cur();
+  if (S.playing && st && visible(st)) {
+    if (S.hold > 0) {
+      S.hold -= dt;
+      if (S.hold <= 0) {
+        if (S.ending) startScenario();
+        else { const j = nextVisible(S.idx); if (j < 0) { S.ending = true; S.hold = 2400; } else setStep(j, false); }
+      }
+    } else if (!S.arrived) {
+      S.t = Math.min(1, S.t + dt / dur(st));
+      if (S.t >= 1) { arrive(); S.hold = 700 / S.speed; }
+    } else { S.hold = 700 / S.speed; }
+  }
+  drawPacket();
+  requestAnimationFrame(frame);
+}
+
+renderHeader();
+setPlaying(S.playing);
+startScenario();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

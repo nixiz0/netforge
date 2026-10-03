@@ -2,6 +2,8 @@
 
 Learn Go and networking by building a proxy that later becomes a VPN.
 
+Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [docs/blueprint.html](docs/blueprint.html) (interactive visual map, open in a browser)
+
 ## Now
 
 Step 2 (HTTP proxy) done: forward proxy on `127.0.0.1:8080` for `http://` and `https://` (via `CONNECT`). Next: SOCKS5 (step 3).
