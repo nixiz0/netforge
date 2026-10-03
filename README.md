@@ -4,7 +4,7 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-TCP echo server and an interactive TCP client on `127.0.0.1:9000`. Next: half-close (step 1.7).
+TCP echo server and an interactive TCP client on `127.0.0.1:9000`. Next: failures and DNS (step 1.8).
 
 ```bash
 go run . echo   # terminal 1
@@ -22,7 +22,7 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 - [x] 1.4 Minimal client: dial, send, read
 - [x] 1.5 Byte stream: one `Read` is not one message
 - [x] 1.6 Interactive client, both directions at once
-- [ ] 1.7 Half-close (FIN)
+- [x] 1.7 Half-close (FIN)
 - [ ] 1.8 Failures: refused vs timeout, DNS
 
 ### 2 — HTTP proxy
