@@ -4,11 +4,12 @@ Learn Go and networking by building a proxy that later becomes a VPN.
 
 ## Now
 
-Step 1 (TCP) done: echo server on `127.0.0.1:9000` and an interactive TCP client that can dial any address. Next: HTTP proxy (step 2).
+TCP forwarder on `127.0.0.1:8080`, relaying every client to a fixed target (the echo server by default). Next: read the HTTP request (step 2.2).
 
 ```bash
-go run . echo   # terminal 1
-go run . dial   # terminal 2 (or: go run . dial example.com:80)
+go run . echo                  # terminal 1: echo server on 127.0.0.1:9000
+go run . proxy                 # terminal 2: proxy on 127.0.0.1:8080
+go run . dial 127.0.0.1:8080   # terminal 3: dial -> proxy -> echo
 ```
 
 ## Roadmap
@@ -27,6 +28,11 @@ Echo, then copy both ways (`Listen` / `Dial` / goroutines).
 
 ### 2 — HTTP proxy
 Plain HTTP, then `CONNECT`. Requests, headers.
+
+- [x] 2.1 TCP forwarder: accept, dial a fixed target, relay both ways
+- [ ] 2.2 Read the HTTP request (request line, headers, `\r\n` framing)
+- [ ] 2.3 Plain HTTP proxy: dial the `Host`, forward the request
+- [ ] 2.4 `CONNECT`: HTTPS through the proxy
 
 ### 3 — SOCKS5
 Binary protocol, IPv4/IPv6, DNS.
@@ -56,12 +62,12 @@ Available:
 ```bash
 netforge echo
 netforge dial [addr]
+netforge proxy [target]
 ```
 
 Planned:
 
 ```bash
-netforge proxy
 netforge socks
 netforge vpn client
 netforge vpn server
