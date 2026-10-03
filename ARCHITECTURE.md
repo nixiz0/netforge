@@ -28,7 +28,8 @@ Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not
 
 ## Runtime model
 
-- **One process = one subcommand.** Servers block forever in an `Accept` loop; `log.Fatal` only at startup (listen failure).
+- **One process = one subcommand.** Servers block forever in an `Accept` loop.
+- **Packages never exit the program.** Every `Run` returns an `error` (listen or dial failure); only `cmd/netforge/main.go` calls `log.Fatal` / `os.Exit`.
 - **One goroutine per accepted connection.** Per-connection errors are logged and the connection dropped; the server keeps running.
 - **Relay pattern** (`dial.Run`, `proxy` `relay()`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
 - **Half-close propagation:** when one side sends FIN, forward it with `(*net.TCPConn).CloseWrite()`, never `Close()`, so in-flight bytes in the other direction are not lost. Full close happens via `defer` on both connections when the function returns.

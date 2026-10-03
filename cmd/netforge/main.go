@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/nixiz0/netforge-go/internal/dial"
@@ -16,19 +17,25 @@ func main() {
 		usage()
 	}
 
+	var err error
 	switch os.Args[1] {
 	case "echo":
-		echo.Run(defaultAddr)
+		err = echo.Run(defaultAddr)
 	case "dial":
 		addr := defaultAddr
 		if len(os.Args) > 2 {
 			addr = os.Args[2]
 		}
-		dial.Run(addr)
+		err = dial.Run(addr)
 	case "proxy":
-		proxy.Run()
+		err = proxy.Run()
 	default:
 		usage()
+	}
+
+	// Packages never exit the program themselves: they return the error, main decides.
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 

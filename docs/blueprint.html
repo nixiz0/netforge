@@ -227,7 +227,7 @@ const LINKS = [["term", "proxy", 1], ["dial", "echo", 1], ["dial", "closed", 1],
 
 // Go files: shown in the Script card.
 const FILES = {
-  "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run"], ["usage()", "Prints help, exits 2"]] },
+  "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] }
@@ -270,7 +270,7 @@ const SCENARIOS = {
     run: ["go run ./cmd/netforge dial 127.0.0.1:9001", "go run ./cmd/netforge dial 10.255.255.1:80"], boot: [],
     steps: [
       { p: ["dial", "closed"], t: "ctl", l: "SYN :9001", f: "internal/dial/dial.go", c: "net.DialTimeout(...)", k: "Port closed", s: "The host is up, but no program listens on 9001." },
-      { p: ["closed", "dial"], t: "ctl", l: "RST", f: "internal/dial/dial.go", c: "log.Fatal(err)", k: "Refused = RST", s: "The kernel resets at once. Network fine, port wrong.",
+      { p: ["closed", "dial"], t: "ctl", l: "RST", f: "internal/dial/dial.go", c: "dial.Run returns err → log.Fatal in main", k: "Refused = RST", s: "The kernel resets at once. Network fine, port wrong.",
         log: [["dial", "dial tcp 127.0.0.1:9001: connectex: … actively refused it."]] },
       { p: ["dial", "router", "void"], t: "lost", l: "SYN", f: "internal/dial/dial.go", c: "net.DialTimeout(..., 5*time.Second)", k: "No answer", s: "The SYN leaves and nothing comes back." },
       { p: ["dial", "router", "void"], t: "lost", l: "SYN retry", f: "internal/dial/dial.go", c: "kernel retransmits", k: "Retransmission", s: "The kernel resends the SYN with growing delays." },

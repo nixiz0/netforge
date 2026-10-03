@@ -7,11 +7,12 @@ import (
 )
 
 // Run accepts TCP connections on addr and sends every byte back.
-func Run(addr string) {
+// It only returns if the listener cannot start.
+func Run(addr string) error {
 	// socket() + bind() + listen(): the kernel now accepts TCP handshakes on this port.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer ln.Close()
 	log.Println("echo server listening on", ln.Addr())

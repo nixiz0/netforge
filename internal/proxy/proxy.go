@@ -15,11 +15,12 @@ import (
 const Addr = "127.0.0.1:8080"
 
 // Run is an HTTP forward proxy on Addr: each request says where it wants to go.
-func Run() {
+// It only returns if the listener cannot start.
+func Run() error {
 	// Server toward the client: same Listen/Accept loop as the echo server.
 	ln, err := net.Listen("tcp", Addr)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer ln.Close()
 	log.Println("HTTP proxy listening on", ln.Addr())
