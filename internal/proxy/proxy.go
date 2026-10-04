@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/nixiz0/netforge-go/internal/relay"
 )
 
 // Addr is where the proxy listens: loopback only.
@@ -68,7 +70,9 @@ func handle(client net.Conn) {
 		log.Printf("%s -> proxy -> %s (CONNECT tunnel)", client.RemoteAddr(), upstream.RemoteAddr())
 
 		io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-		relay(client, br, upstream)
+		// Read the client through br, not client: bufio may already hold the start of the TLS handshake.
+		relay.Pipe(client, br, upstream)
+		log.Printf("%s closed", client.RemoteAddr())
 		return
 	}
 
@@ -104,20 +108,8 @@ func handle(client net.Conn) {
 	}
 	io.WriteString(upstream, "\r\n")
 
-	relay(client, br, upstream)
-}
-
-// relay copies bytes both ways until the target closes, like dial does.
-func relay(client net.Conn, br *bufio.Reader, upstream net.Conn) {
-	// Client -> target in the background, reading from br and not client: bufio may already hold
-	// bytes that came after the head (a body, or the start of the TLS handshake). Pass the client's FIN on.
-	go func() {
-		io.Copy(upstream, br)
-		upstream.(*net.TCPConn).CloseWrite()
-	}()
-
-	// Target -> client here. When the target sends FIN we return, and the caller's defers close both connections.
-	io.Copy(client, upstream)
+	// Read the client through br, not client: bufio may already hold bytes after the head (a body).
+	relay.Pipe(client, br, upstream)
 	log.Printf("%s closed", client.RemoteAddr())
 }
 

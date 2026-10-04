@@ -23,16 +23,17 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 server on `socks.Addr` (`127.0.0.1:1080`), in progress: greeting + CONNECT request parsing, no relay yet | `socks.Run()` |
+| `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 
-Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not import each other yet. When a helper is needed by two features (e.g. the two-way `relay`), move it to its own `internal/<name>` package instead of importing a sibling feature.
+Dependency rule: `cmd/netforge` imports the feature packages; feature packages may import shared helper packages (`internal/relay`) but never each other. When a helper is needed by two features, move it to its own `internal/<name>` package.
 
 ## Runtime model
 
 - **One process = one subcommand.** Servers block forever in an `Accept` loop.
 - **Packages never exit the program.** Every `Run` returns an `error` (listen or dial failure); only `cmd/netforge/main.go` calls `log.Fatal` / `os.Exit`.
 - **One goroutine per accepted connection.** Per-connection errors are logged and the connection dropped; the server keeps running.
-- **Relay pattern** (`dial.Run`, `proxy` `relay()`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
+- **Relay pattern** (`relay.Pipe`, and the stdin/stdout variant in `dial.Run`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
 - **Half-close propagation:** when one side sends FIN, forward it with `(*net.TCPConn).CloseWrite()`, never `Close()`, so in-flight bytes in the other direction are not lost. Full close happens via `defer` on both connections when the function returns.
 - **Timeouts:** outbound dials use `net.DialTimeout(..., 5*time.Second)`. No read/write/idle deadlines yet.
 - **Binding:** everything listens on loopback (`127.0.0.1`) by design. Exposing on `0.0.0.0` needs auth first.
@@ -52,7 +53,7 @@ Dependency rule: `cmd/netforge` imports `internal/*`; `internal` packages do not
 - Only the first request per client connection is parsed; later requests on a kept-alive connection go to the first target.
 - Hop-by-hop headers (`Proxy-Connection`, `Connection`, ...) are forwarded untouched.
 - No auth, no access control, no metrics; logging is `log` to stderr.
-- `io.Copy` errors inside `relay()` are ignored (closing races produce expected "use of closed connection" errors).
+- `io.Copy` errors inside `relay.Pipe` are ignored (closing races produce expected "use of closed connection" errors).
 
 ## Conventions
 

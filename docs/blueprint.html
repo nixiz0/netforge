@@ -206,7 +206,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.2", what: "SOCKS5 CONNECT request" };
+const SYNC = { step: "3.3", what: "shared relay package" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
@@ -231,8 +231,9 @@ const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
-  "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["relay(client, br, up)", "Two io.Copy, CloseWrite passes the FIN on"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
-  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: no relay yet)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, (next) dial and relay"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"]] }
+  "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
+  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: no relay yet)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, (next) dial and relay"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"]] },
+  "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy, soon socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
 // Scenarios = what the system can do today. Each step = one packet.
@@ -292,8 +293,8 @@ const SCENARIOS = {
       { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", target, 5s)", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
         log: [["proxy", "127.0.0.1:52350 -> proxy -> 203.0.113.10:80"]] },
       { p: ["proxy", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "internal/proxy/proxy.go", c: "head[0] = method + \" \" + u.RequestURI() + …", k: "Origin-form rewrite", s: "The site expects only the path." },
-      { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "internal/proxy/proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
-      { p: ["proxy", "term"], t: "data", l: "200 OK + HTML", f: "internal/proxy/proxy.go", c: "relay(): io.Copy(client, upstream)", k: "Relay", s: "…and is copied unchanged onto connection 1." },
+      { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "internal/relay/relay.go", c: "relay.Pipe: io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
+      { p: ["proxy", "term"], t: "data", l: "200 OK + HTML", f: "internal/relay/relay.go", c: "relay.Pipe: io.Copy(client, upstream)", k: "Relay", s: "…and is copied unchanged onto connection 1." },
       { p: ["site", "router", "proxy"], t: "ctl", l: "FIN", f: "internal/proxy/proxy.go", c: "io.Copy returns", k: "Close propagates", s: "The site closes connection 2." },
       { p: ["proxy", "term"], t: "ctl", l: "FIN", f: "internal/proxy/proxy.go", c: "defer client.Close()", k: "Close propagates", s: "The proxy closes connection 1.", log: [["proxy", "127.0.0.1:52350 closed"]] }
     ]
@@ -310,10 +311,10 @@ const SCENARIOS = {
       { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
         log: [["proxy", "127.0.0.1:52351 -> proxy -> 203.0.113.10:443 (CONNECT tunnel)"]] },
       { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "internal/proxy/proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
-      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/proxy/proxy.go", c: "relay(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
-      { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "internal/proxy/proxy.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
-      { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/proxy/proxy.go", c: "io.Copy(upstream, br)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
-      { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "internal/proxy/proxy.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/relay/relay.go", c: "io.Copy(upstream, fromClient)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
+      { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
     ]
   },
   socks: {

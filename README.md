@@ -6,7 +6,7 @@ Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [doc
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`. SOCKS5 server on `127.0.0.1:1080` in progress: it answers the greeting and reads the CONNECT target, but does not relay yet. Next: share the relay (step 3.3).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`. SOCKS5 server on `127.0.0.1:1080` in progress: it answers the greeting and reads the CONNECT target, but does not relay yet. Next: connect, reply and relay (step 3.4).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -43,7 +43,7 @@ Binary protocol, IPv4/IPv6, DNS.
 
 - [x] 3.1 Greeting: method negotiation, binary framing with `io.ReadFull`
 - [x] 3.2 Read the CONNECT request (address type, big-endian port)
-- [ ] 3.3 Share the relay: move it to `internal/relay`
+- [x] 3.3 Share the relay: move it to `internal/relay`
 - [ ] 3.4 Connect, reply, relay: a working SOCKS5 proxy
 - [ ] 3.5 DNS: client-side vs proxy-side resolution
 
