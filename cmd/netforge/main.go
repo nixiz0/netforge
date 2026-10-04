@@ -48,6 +48,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  echo            TCP echo server on "+defaultAddr)
 	fmt.Fprintln(os.Stderr, "  dial [addr]     connect to addr (default "+defaultAddr+"), type to send, replies are printed")
 	fmt.Fprintln(os.Stderr, "  proxy           HTTP forward proxy on "+proxy.Addr)
-	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (in progress: no relay yet)")
+	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (no auth, CONNECT)")
 	os.Exit(2)
 }

@@ -8,6 +8,9 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"time"
+
+	"github.com/nixiz0/netforge/internal/relay"
 )
 
 // Addr is where the SOCKS5 server listens: loopback only, standard SOCKS port.
@@ -24,6 +27,10 @@ const (
 	atypIPv4   = 0x01 // address = 4 bytes
 	atypDomain = 0x03 // address = 1 length byte + that many bytes of name
 	atypIPv6   = 0x04 // address = 16 bytes
+
+	repSuccess         = 0x00 // reply: "connected, start sending"
+	repGeneralFailure  = 0x01 // reply: the request itself was bad
+	repHostUnreachable = 0x04 // reply: the target could not be reached
 )
 
 // Run accepts SOCKS5 clients on Addr.
@@ -60,10 +67,32 @@ func handle(client net.Conn) {
 	target, err := readRequest(client)
 	if err != nil {
 		log.Printf("%s request: %v", client.RemoteAddr(), err)
+		reply(client, repGeneralFailure, nil)
 		return
 	}
 	log.Printf("%s CONNECT %s", client.RemoteAddr(), target)
-	// Next (step 3.4): dial target, send the reply, relay.
+
+	// Client toward the target: a second TCP connection, exactly like the HTTP proxy.
+	// Theory: _networking-lessons/3-http-tls-proxies.md#forward-proxy
+	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
+	if err != nil {
+		log.Println("dial:", err)
+		reply(client, repHostUnreachable, nil)
+		return
+	}
+	defer upstream.Close()
+	log.Printf("%s -> socks -> %s", client.RemoteAddr(), upstream.RemoteAddr())
+
+	// Success reply, then the last step of the handshake: "Data is relayed".
+	// Theory: _networking-lessons/3-http-tls-proxies.md#socks5-handshake
+	if err := reply(client, repSuccess, upstream.LocalAddr()); err != nil {
+		log.Printf("%s reply: %v", client.RemoteAddr(), err)
+		return
+	}
+	// No bufio here: SOCKS5 is read with io.ReadFull on the conn itself, so nothing is buffered
+	// past the request and the relay can read the client directly.
+	relay.Pipe(client, client, upstream)
+	log.Printf("%s closed", client.RemoteAddr())
 }
 
 // greet runs the SOCKS5 method negotiation:
@@ -154,4 +183,31 @@ func readRequest(conn net.Conn) (string, error) {
 		return "", err
 	}
 	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port)))), nil
+}
+
+// reply sends the answer to the CONNECT request:
+//
+//	VER  REP  RSV  ATYP  BND.ADDR       BND.PORT
+//	05   00   00   01    c0 a8 01 14    ce 18      (success, bound to 192.168.1.20:52760)
+//
+// BND is the proxy's own end of the upstream connection; on failure it is 0.0.0.0:0.
+func reply(conn net.Conn, rep byte, bind net.Addr) error {
+	ip, port := net.IPv4zero, 0
+	if a, ok := bind.(*net.TCPAddr); ok {
+		ip, port = a.IP, a.Port
+	}
+
+	msg := []byte{version5, rep, 0x00}
+	if ip4 := ip.To4(); ip4 != nil {
+		msg = append(msg, atypIPv4)
+		msg = append(msg, ip4...)
+	} else {
+		msg = append(msg, atypIPv6)
+		msg = append(msg, ip.To16()...)
+	}
+	// Port in network byte order (big-endian), the reverse of what readRequest decodes.
+	msg = binary.BigEndian.AppendUint16(msg, uint16(port))
+
+	_, err := conn.Write(msg)
+	return err
 }

@@ -208,7 +208,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.3", what: "theory linked" };
+const SYNC = { step: "3.4", what: "working SOCKS5 proxy" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
@@ -226,7 +226,7 @@ const NODES = {
   site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's.", th: "3-http-tls-proxies.md#forward-proxy|Forward proxy" },
   void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out.", th: "2-transport-networking.md#retransmission|Retransmission" }
 };
-const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
+const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["socks", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
 
 // Go files: shown in the Script card.
 const FILES = {
@@ -234,8 +234,8 @@ const FILES = {
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
-  "internal/socks/socks.go": { role: "SOCKS5 server on 127.0.0.1:1080 (in progress: no relay yet)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, (next) dial and relay"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"]] },
-  "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy, soon socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
+  "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"]] },
+  "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
 // Scenarios = what the system can do today. Each step = one packet.
@@ -320,17 +320,25 @@ const SCENARIOS = {
     ]
   },
   socks: {
-    name: "SOCKS5 (wip)", blurb: "Binary greeting, then the CONNECT request: the target travels as typed bytes. Relay comes in 3.4.",
-    run: ["go run ./cmd/netforge socks", "curl.exe --socks5-hostname 127.0.0.1:1080 http://example.com/"], boot: [["socks", "SOCKS5 server listening on 127.0.0.1:1080"]],
+    name: "SOCKS5", blurb: "Binary handshake, then the proxy dials and relays. Works for any TCP protocol: HTTP, HTTPS, SSH…",
+    run: ["go run ./cmd/netforge socks", "curl.exe --socks5-hostname 127.0.0.1:1080 https://example.com/"], boot: [["socks", "SOCKS5 server listening on 127.0.0.1:1080"]],
     steps: [
-      { p: ["term", "socks"], t: "ctl", l: "handshake", f: "internal/socks/socks.go", c: "ln.Accept() → go handle(client)", k: "Same TCP as always", s: "SOCKS5 starts like every TCP server: Listen, Accept, one goroutine per client." },
+      { p: ["term", "socks"], t: "ctl", l: "handshake #1", f: "internal/socks/socks.go", c: "ln.Accept() → go handle(client)", k: "Same TCP as always", s: "SOCKS5 starts like every TCP server: Listen, Accept, one goroutine per client." },
       { p: ["term", "socks"], t: "data", l: "05 01 00", f: "internal/socks/socks.go", c: "io.ReadFull(conn, head) · io.ReadFull(conn, methods)", k: "Binary, length-prefixed", s: "Version 5, 1 method follows, method 0x00 = no auth. The 2nd byte says how many bytes to read next.",
         log: [["socks", "127.0.0.1:52360 greeting: 05 01 00"]] },
       { p: ["socks", "term"], t: "data", l: "05 00", f: "internal/socks/socks.go", c: "conn.Write([]byte{version5, methodNoAuth})", k: "Method chosen", s: "Two bytes: version 5, \"no authentication\". 0xFF would mean none acceptable.",
         log: [["socks", "127.0.0.1:52360 greeting done, no authentication"]] },
-      { p: ["term", "socks"], t: "data", l: "05 01 00 03 0b example.com 00 50", f: "internal/socks/socks.go", c: "readRequest(conn)", k: "Typed address + big-endian port", s: "CONNECT, address type 03 = domain (length 0x0b = 11, then the name), port 00 50 = 80.",
-        log: [["socks", "127.0.0.1:52360 CONNECT example.com:80"]] },
-      { p: ["socks", "term"], t: "ctl", l: "FIN", f: "internal/socks/socks.go", c: "defer client.Close()", k: "Not finished yet", s: "The server knows the target. Dialing it and replying is step 3.4, so for now it closes." }
+      { p: ["term", "socks"], t: "data", l: "05 01 00 03 0b example.com 01 bb", f: "internal/socks/socks.go", c: "readRequest(conn)", k: "Typed address + big-endian port", s: "CONNECT, type 03 = domain (length 0x0b = 11, then the name), port 01 bb = 443.",
+        log: [["socks", "127.0.0.1:52360 CONNECT example.com:443"]] },
+      { p: ["socks", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/socks/socks.go", c: "net.DialTimeout(\"tcp\", target, 5*time.Second)", k: "DNS lookup", s: "With --socks5-hostname curl sent a name, so the proxy resolves it (step 3.5 compares)." },
+      { p: ["dns", "router", "socks"], t: "dns", l: "203.0.113.10", f: "internal/socks/socks.go", c: "Go's resolver", k: "DNS answer", s: "Now the proxy can open its own connection." },
+      { p: ["socks", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/socks/socks.go", c: "net.DialTimeout(\"tcp\", target, 5*time.Second)", k: "Client toward the site", s: "Connection 2: the proxy becomes the client, same as the HTTP proxy.",
+        log: [["socks", "127.0.0.1:52360 -> socks -> 203.0.113.10:443"]] },
+      { p: ["socks", "term"], t: "data", l: "05 00 00 01 c0 a8 01 14 ce 18", f: "internal/socks/socks.go", c: "reply(client, repSuccess, upstream.LocalAddr())", k: "SOCKS5 reply", s: "Success (00) + the proxy's own end of connection 2: 192.168.1.20:52760, port big-endian." },
+      { p: ["term", "socks", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, client, upstream)", k: "Data is relayed", s: "Handshake step 4. From now on SOCKS5 copies bytes blindly; it never knew this was HTTPS." },
+      { p: ["site", "router", "socks", "term"], t: "tls", l: "ServerHello + cert", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Relay · TLS end to end", s: "TLS runs between curl and the site, straight through the proxy." },
+      { p: ["term", "socks", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/relay/relay.go", c: "io.Copy(upstream, fromClient)", k: "Blind relay", s: "Unlike the HTTP proxy, SOCKS5 never parses anything after the reply." },
+      { p: ["site", "router", "socks", "term"], t: "tls", l: "encrypted HTML", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in.", log: [["socks", "127.0.0.1:52360 closed"]] }
     ]
   }
 };
@@ -357,7 +365,7 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "Not finished yet": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "next"], ["UDP"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];

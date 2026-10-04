@@ -22,14 +22,14 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`. SOCKS5 server on `127.0.0.1:1080` in progress: it answers the greeting and reads the CONNECT target, but does not relay yet. Next: connect, reply and relay (step 3.4).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080` and a working SOCKS5 proxy on `127.0.0.1:1080` (no auth, TCP CONNECT). Next: who resolves DNS, client or proxy (step 3.5).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
 curl.exe -x http://127.0.0.1:8080 https://example.com/
 
-go run ./cmd/netforge socks                                # SOCKS5 (no relay yet)
-curl.exe --socks5-hostname 127.0.0.1:1080 http://example.com/
+go run ./cmd/netforge socks                                # SOCKS5
+curl.exe --socks5-hostname 127.0.0.1:1080 https://example.com/
 ```
 
 ## Roadmap
@@ -60,7 +60,7 @@ Binary protocol, IPv4/IPv6, DNS.
 - [x] 3.1 Greeting: method negotiation, binary framing with `io.ReadFull`
 - [x] 3.2 Read the CONNECT request (address type, big-endian port)
 - [x] 3.3 Share the relay: move it to `internal/relay`
-- [ ] 3.4 Connect, reply, relay: a working SOCKS5 proxy
+- [x] 3.4 Connect, reply, relay: a working SOCKS5 proxy
 - [ ] 3.5 DNS: client-side vs proxy-side resolution
 
 ### 4 — UDP
@@ -91,7 +91,7 @@ Available:
 netforge echo
 netforge dial [addr]
 netforge proxy
-netforge socks      # in progress
+netforge socks
 ```
 
 Planned:

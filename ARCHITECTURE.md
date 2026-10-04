@@ -22,7 +22,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/echo/` | TCP echo server on `127.0.0.1:9000` | `echo.Run(addr)` |
 | `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
-| `internal/socks/` | SOCKS5 server on `socks.Addr` (`127.0.0.1:1080`), in progress: greeting + CONNECT request parsing, no relay yet | `socks.Run()` |
+| `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 | `_networking-lessons/` | Networking theory, one Markdown file per topic. The `_` prefix sorts it first and makes the Go tool ignore it | read on GitHub |
@@ -69,10 +69,18 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 
 **Invariant:** after `readHead`, always read the client through `br`, never the raw `net.Conn`: bufio may already hold body or TLS bytes.
 
+## SOCKS5 internals (`internal/socks`)
+
+1. `greet`: `VER NMETHODS METHODS…` read with `io.ReadFull`; reply `05 00` if "no auth" (0x00) is offered, else `05 FF` and close.
+2. `readRequest`: `VER CMD RSV ATYP ADDR PORT`; only `CMD=01` (CONNECT); address by type (IPv4 4 bytes, domain length-prefixed, IPv6 16 bytes); port big-endian.
+3. Dial the target (5 s). Reply `05 REP 00 ATYP BND.ADDR BND.PORT` via `reply()`: `00` success with the proxy's local end of the upstream connection, `04` host unreachable, `01` bad request.
+4. `relay.Pipe(client, client, upstream)`: no bufio anywhere in SOCKS5, so the raw conn is safe to read.
+
 ## Known limitations (deliberate, for now)
 
 - Only the first request per client connection is parsed; later requests on a kept-alive connection go to the first target.
 - Hop-by-hop headers (`Proxy-Connection`, `Connection`, ...) are forwarded untouched.
+- SOCKS5: no username/password auth, no `BIND` / `UDP ASSOCIATE`; every dial failure is reported as `04` host unreachable (refused vs timeout is not distinguished).
 - No auth, no access control, no metrics; logging is `log` to stderr.
 - `io.Copy` errors inside `relay.Pipe` are ignored (closing races produce expected "use of closed connection" errors).
 
