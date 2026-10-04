@@ -10,14 +10,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nixiz0/netforge-go/internal/relay"
+	"github.com/nixiz0/netforge/internal/relay"
 )
 
 // Addr is where the proxy listens: loopback only.
+//
+// Theory: _networking-lessons/1-network-fundamentals.md#5-loopback
 const Addr = "127.0.0.1:8080"
 
 // Run is an HTTP forward proxy on Addr: each request says where it wants to go.
 // It only returns if the listener cannot start.
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#forward-proxy
 func Run() error {
 	// Server toward the client: same Listen/Accept loop as the echo server.
 	ln, err := net.Listen("tcp", Addr)
@@ -41,6 +45,7 @@ func handle(client net.Conn) {
 	defer client.Close()
 
 	// Read the HTTP request head (request line + headers) before connecting anywhere.
+	// Theory: _networking-lessons/3-http-tls-proxies.md#http-request-structure
 	br := bufio.NewReader(client)
 	head, err := readHead(br)
 	if err != nil {
@@ -50,6 +55,7 @@ func handle(client net.Conn) {
 	log.Printf("%s request line: %q", client.RemoteAddr(), head[0])
 
 	// A client talking to a proxy sends the full URL: "GET http://example.com/path HTTP/1.1".
+	// Theory: _networking-lessons/3-http-tls-proxies.md#plain-http-proxying
 	parts := strings.Fields(head[0])
 	if len(parts) != 3 {
 		log.Println("bad request line")
@@ -59,6 +65,8 @@ func handle(client net.Conn) {
 
 	// HTTPS: "CONNECT example.com:443 HTTP/1.1". The client wants a raw TCP tunnel and will do TLS
 	// through it, end to end with the website: after the 200 reply we can only relay encrypted bytes.
+	// Theory: _networking-lessons/3-http-tls-proxies.md#http-connect
+	// Theory: _networking-lessons/3-http-tls-proxies.md#what-the-connect-proxy-can-still-know
 	if method == "CONNECT" {
 		upstream, err := net.DialTimeout("tcp", rawURL, 5*time.Second)
 		if err != nil {
@@ -84,6 +92,7 @@ func handle(client net.Conn) {
 	}
 
 	// The destination comes from the URL; port 80 is the default for http://.
+	// Theory: _networking-lessons/3-http-tls-proxies.md#url-breakdown
 	target := u.Host
 	if u.Port() == "" {
 		target = net.JoinHostPort(u.Hostname(), "80")
@@ -93,6 +102,7 @@ func handle(client net.Conn) {
 	head[0] = method + " " + u.RequestURI() + " " + version + "\r\n"
 
 	// Client toward the target: a second, separate TCP connection (its own handshake, its own 4-tuple).
+	// Theory: _networking-lessons/2-transport-networking.md#ports-and-connection-identity
 	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {
 		log.Println("dial:", err)
@@ -115,6 +125,9 @@ func handle(client net.Conn) {
 
 // readHead reads the request line and the headers, up to the empty line that ends them.
 // HTTP framing: every line ends with \r\n, and an empty line marks the end of the head.
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#http-framing
+// Theory: _networking-lessons/2-transport-networking.md#tcp-is-a-byte-stream
 func readHead(br *bufio.Reader) ([]string, error) {
 	var lines []string
 	for {

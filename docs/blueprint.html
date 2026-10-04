@@ -118,6 +118,8 @@ code, .mono { font-family: var(--font-mono); }
 .concept span { color: var(--fg); font-size: 13px; }
 .where { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .where code { font-size: 11.5px; color: var(--gold-hi); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 7px; overflow-wrap: anywhere; }
+.theory { display: inline-flex; margin-top: 8px; font-size: 12px; color: var(--ice); text-decoration: none; border-bottom: 1px dashed var(--ice-lo); }
+.theory:hover { color: var(--gold-hi); border-color: var(--gold); }
 .chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--gold-lo); background: rgba(214,167,64,.08); color: var(--gold-hi); }
 .sc h3 { margin: 0; font: 600 15px var(--font-mono); color: var(--gold-hi); }
 .sc p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
@@ -206,23 +208,23 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.3", what: "shared relay package" };
+const SYNC = { step: "3.3", what: "theory linked" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
 
 // Map nodes (viewBox 1000x580). `script` = Go file that runs there.
 const NODES = {
-  term:   { x: 110, y: 160, label: "curl.exe", sub: "any HTTP client", info: "An app told to use the proxy: curl -x, or a browser. Not our code." },
+  term:   { x: 110, y: 160, label: "curl.exe", sub: "any HTTP client", info: "An app told to use the proxy: curl -x, or a browser. Not our code.", th: "3-http-tls-proxies.md#forward-proxy|Forward proxy" },
   dial:   { x: 110, y: 400, label: "dial", sub: "internal/dial", script: "internal/dial/dial.go" },
   proxy:  { x: 345, y: 160, label: "proxy", sub: "internal/proxy", port: ":8080", script: "internal/proxy/proxy.go" },
   echo:   { x: 345, y: 290, label: "echo", sub: "internal/echo", port: ":9000", script: "internal/echo/echo.go" },
   socks:  { x: 110, y: 290, label: "socks", sub: "internal/socks", port: ":1080", script: "internal/socks/socks.go" },
-  closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST." },
-  router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies." },
-  dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start." },
-  site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's." },
-  void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out." }
+  closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST.", th: "2-transport-networking.md#closing-tcp|Closing TCP (RST)" },
+  router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies.", th: "1-network-fundamentals.md#12-nat|NAT" },
+  dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start.", th: "1-network-fundamentals.md#18-dns|DNS" },
+  site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's.", th: "3-http-tls-proxies.md#forward-proxy|Forward proxy" },
+  void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out.", th: "2-transport-networking.md#retransmission|Retransmission" }
 };
 const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "router"], ["proxy", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
 
@@ -286,7 +288,7 @@ const SCENARIOS = {
     run: ["go run ./cmd/netforge proxy", "curl.exe -x http://127.0.0.1:8080 http://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
     steps: [
       { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "internal/proxy/proxy.go", c: "ln.Accept() → go handle(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
-      { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "internal/proxy/proxy.go", c: "readHead(br)", k: "Absolute-form request", s: "Through a proxy, the request line carries the full URL.",
+      { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "internal/proxy/proxy.go", c: "br := bufio.NewReader(client) · readHead(br)", k: "Absolute-form request · bufio", s: "The request line carries the full URL. bufio pulls a 4 KB chunk, hands back the head line by line and keeps any extra bytes.",
         log: [["proxy", "127.0.0.1:52350 request line: \"GET http://example.com/ HTTP/1.1\\r\\n\""]] },
       { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "url.Parse(rawURL) → example.com:80", k: "Target from the URL", s: "No port in the URL means 80. Then a DNS lookup." },
       { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "The proxy resolves the name, not curl." },
@@ -304,14 +306,14 @@ const SCENARIOS = {
     run: ["go run ./cmd/netforge proxy", "curl.exe -x http://127.0.0.1:8080 https://example.com/"], boot: [["proxy", "HTTP proxy listening on 127.0.0.1:8080"]],
     steps: [
       { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "internal/proxy/proxy.go", c: "ln.Accept() → go handle(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
-      { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "internal/proxy/proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT", s: "Only host:port travels in clear text.",
+      { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "internal/proxy/proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT · bufio", s: "Only host:port travels in clear text. bytes after the head (the TLS ClientHello) may already sit in br, so the relay reads through br.",
         log: [["proxy", "127.0.0.1:52351 request line: \"CONNECT example.com:443 HTTP/1.1\\r\\n\""]] },
       { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "DNS lookup", s: "The proxy resolves the name." },
       { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "Now it can connect to port 443." },
       { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
         log: [["proxy", "127.0.0.1:52351 -> proxy -> 203.0.113.10:443 (CONNECT tunnel)"]] },
       { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "internal/proxy/proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
-      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, br, upstream)", k: "TLS end to end", s: "The handshake crosses the proxy untouched. Only the SNI name is visible." },
+      { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, br, upstream)", k: "Relay · TLS end to end", s: "relay.Pipe now copies blindly both ways. The handshake crosses the proxy untouched; only the SNI name is visible." },
       { p: ["site", "router", "proxy", "term"], t: "tls", l: "ServerHello + cert", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Authentication", s: "The site proves who it is to curl, not to the proxy." },
       { p: ["term", "proxy", "router", "site"], t: "tls", l: "encrypted GET /", f: "internal/relay/relay.go", c: "io.Copy(upstream, fromClient)", k: "Confidentiality", s: "The proxy sees sizes and timing, never the URL path or headers." },
       { p: ["site", "router", "proxy", "term"], t: "tls", l: "encrypted HTML", f: "internal/relay/relay.go", c: "io.Copy(client, upstream)", k: "Blind relay", s: "Same bytes out as in." }
@@ -331,6 +333,31 @@ const SCENARIOS = {
       { p: ["socks", "term"], t: "ctl", l: "FIN", f: "internal/socks/socks.go", c: "defer client.Close()", k: "Not finished yet", s: "The server knows the target. Dialing it and replying is step 3.4, so for now it closes." }
     ]
   }
+};
+
+// Theory links: concept (step "k") → lesson section. Format "file.md#anchor|Section title".
+const LESSONS = "https://github.com/nixiz0/netforge/blob/prod/_networking-lessons/";
+const T2 = "2-transport-networking.md#", T3 = "3-http-tls-proxies.md#", T1 = "1-network-fundamentals.md#";
+const THEORY = {
+  "Handshake 1/3": T2 + "three-way-handshake|Three-way handshake", "Handshake 2/3": T2 + "three-way-handshake|Three-way handshake",
+  "Handshake 3/3 · ESTABLISHED": T2 + "three-way-handshake|Three-way handshake", "ESTABLISHED": T2 + "three-way-handshake|Three-way handshake",
+  "Byte stream": T2 + "tcp-is-a-byte-stream|TCP is a byte stream", "Full-duplex": T2 + "tcp-essentials|TCP essentials",
+  "Half-close": T2 + "closing-tcp|Closing TCP", "Graceful close · TIME_WAIT": T2 + "closing-tcp|Closing TCP",
+  "Server closes first": T2 + "closing-tcp|Closing TCP", "Close propagates": T2 + "closing-tcp|Closing TCP",
+  "Port closed": T2 + "closing-tcp|Closing TCP (RST)", "Refused = RST": T2 + "closing-tcp|Closing TCP (RST)",
+  "No answer": T2 + "retransmission|Retransmission", "Retransmission": T2 + "retransmission|Retransmission", "Timeout = silence": T2 + "retransmission|Retransmission",
+  "DNS lookup": T1 + "18-dns|DNS", "DNS answer": T1 + "18-dns|DNS",
+  "Handshake through NAT": T1 + "12-nat|NAT", "NAT state": "4-advanced-network-concepts.md#nat-state|NAT state",
+  "HTTP is text over TCP": T3 + "http-request-structure|HTTP request structure", "HTTP response": T3 + "http-response-structure|HTTP response structure",
+  "Server toward the client": T3 + "forward-proxy|Forward proxy", "Client toward the site": T3 + "forward-proxy|Forward proxy", "Relay": T3 + "forward-proxy|Forward proxy",
+  "Absolute-form request · bufio": T3 + "plain-http-proxying|Plain HTTP proxying", "Origin-form rewrite": T3 + "plain-http-proxying|Plain HTTP proxying",
+  "Target from the URL": T3 + "url-breakdown|URL breakdown",
+  "HTTP CONNECT · bufio": T3 + "http-connect|HTTP CONNECT", "Tunnel open": T3 + "http-connect|HTTP CONNECT",
+  "Relay · TLS end to end": T3 + "what-tls-protects|What TLS protects", "Authentication": T3 + "authentication|Authentication",
+  "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
+  "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
+  "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
+  "Not finished yet": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "next"], ["UDP"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
@@ -357,6 +384,8 @@ const layerOf = (st) => (st.t === "lost" ? "ctl" : st.t);
 const visible = (st) => S.layers[layerOf(st)];
 const nextVisible = (from) => { const st = SC().steps; for (let j = from + 1; j < st.length; j++) if (visible(st[j])) return j; return -1; };
 const prevVisible = (from) => { const st = SC().steps; for (let j = from - 1; j >= 0; j--) if (visible(st[j])) return j; return -1; };
+const theoryLink = (t) => { if (!t) return ""; const [ref, title] = t.split("|");
+  return `<a class="theory" href="${LESSONS}${ref}" target="_blank" rel="noopener">Theory · ${esc(title)} ↗</a>`; };
 const scenNodes = () => new Set(SC().steps.flatMap((s) => s.p));
 
 /* ---------- header ---------- */
@@ -469,14 +498,15 @@ function renderNow() {
     <div class="pl">${esc(st.l)}</div>
     <div class="route">${esc(route)}</div>
     <div class="concept"><b>${esc(st.k)}</b><span>${esc(st.s)}</span></div>
-    <div class="where"><button class="chip" data-f="${st.f}">${st.f}</button><code>${esc(st.c)}</code></div>`;
+    <div class="where"><button class="chip" data-f="${st.f}">${st.f}</button><code>${esc(st.c)}</code></div>
+    ${theoryLink(THEORY[st.k])}`;
   $("#now .chip").onclick = () => { S.pinned = Object.keys(NODES).find((id) => NODES[id].script === st.f) || null; setPlaying(false); renderMap(); renderScript(); };
 }
 function renderScript() {
   const st = cur();
   const node = S.pinned ? NODES[S.pinned] : null;
   if (node && !node.script) {
-    $("#script").innerHTML = `<div class="hd"><span class="kick">On the map</span></div><h3>${esc(node.label)}${node.port ? " " + esc(node.port) : ""}</h3><p>${esc(node.info)}</p>`;
+    $("#script").innerHTML = `<div class="hd"><span class="kick">On the map</span></div><h3>${esc(node.label)}${node.port ? " " + esc(node.port) : ""}</h3><p>${esc(node.info)}</p>${theoryLink(node.th)}`;
     return;
   }
   const file = node ? node.script : st ? st.f : "cmd/netforge/main.go", f = FILES[file];

@@ -10,11 +10,15 @@ import (
 // fromClient is where the client's bytes are read: the connection itself, or a bufio.Reader
 // wrapping it when a protocol header was already parsed and bufio may hold bytes past it.
 // The client's FIN is passed on to upstream with a half-close. The caller closes both connections.
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#forward-proxy
+// Theory: _networking-lessons/2-transport-networking.md#tcp-essentials
 func Pipe(client net.Conn, fromClient io.Reader, upstream net.Conn) {
 	// Client -> upstream in the background. When the client sends FIN, pass it on.
 	go func() {
 		io.Copy(upstream, fromClient)
 		// Any connection that supports a half-close (TCP does) gets CloseWrite instead of a full Close.
+		// Theory: _networking-lessons/2-transport-networking.md#closing-tcp
 		if hc, ok := upstream.(interface{ CloseWrite() error }); ok {
 			hc.CloseWrite()
 		}

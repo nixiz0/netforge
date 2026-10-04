@@ -5,12 +5,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/nixiz0/netforge-go/internal/dial"
-	"github.com/nixiz0/netforge-go/internal/echo"
-	"github.com/nixiz0/netforge-go/internal/proxy"
-	"github.com/nixiz0/netforge-go/internal/socks"
+	"github.com/nixiz0/netforge/internal/dial"
+	"github.com/nixiz0/netforge/internal/echo"
+	"github.com/nixiz0/netforge/internal/proxy"
+	"github.com/nixiz0/netforge/internal/socks"
 )
 
+// Theory: _networking-lessons/1-network-fundamentals.md#5-loopback
 const defaultAddr = "127.0.0.1:9000" // loopback
 
 func main() {

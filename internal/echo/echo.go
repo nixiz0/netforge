@@ -10,6 +10,8 @@ import (
 // It only returns if the listener cannot start.
 func Run(addr string) error {
 	// socket() + bind() + listen(): the kernel now accepts TCP handshakes on this port.
+	// Theory: _networking-lessons/2-transport-networking.md#tcp-server-lifecycle
+	// Theory: _networking-lessons/2-transport-networking.md#binding-addresses
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -19,12 +21,14 @@ func Run(addr string) error {
 
 	for {
 		// Blocks until the kernel has a fully ESTABLISHED connection in its backlog queue.
+		// Theory: _networking-lessons/2-transport-networking.md#three-way-handshake
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Println("accept:", err)
 			continue
 		}
 		// Handle each client in its own goroutine so the loop goes straight back to Accept().
+		// Theory: _networking-lessons/2-transport-networking.md#ports-and-connection-identity
 		go handle(conn)
 	}
 }
@@ -34,6 +38,8 @@ func handle(conn net.Conn) {
 	log.Println("new connection from", conn.RemoteAddr())
 
 	// Read from conn, write back to conn, until the client sends FIN (io.EOF).
+	// Theory: _networking-lessons/2-transport-networking.md#tcp-is-a-byte-stream
+	// Theory: _networking-lessons/2-transport-networking.md#closing-tcp
 	n, err := io.Copy(conn, conn)
 	if err != nil {
 		log.Println("copy:", err)

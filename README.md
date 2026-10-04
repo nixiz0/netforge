@@ -1,8 +1,24 @@
 # Netforge
 
-Learn Go and networking by building a proxy that later becomes a VPN.
+Learn networking fundamentals (theory) and build a proxy and a VPN in Go (practice).
 
-Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [docs/blueprint.html](docs/blueprint.html) (interactive visual map, open in a browser)
+Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (stack, internals, conventions) · [docs/blueprint.html](docs/blueprint.html) (interactive visual map, open in a browser) · [_networking-lessons/](_networking-lessons/) (theory)
+
+## Theory ↔ practice
+
+Each roadmap stage has its lesson. In the code, `// Theory:` comments point to the exact section a line puts into practice.
+
+| Lesson | Practiced in |
+|---|---|
+| [1 · Network fundamentals](_networking-lessons/1-network-fundamentals.md) | loopback, DNS, NAT, MTU: all stages |
+| [2 · Transport networking](_networking-lessons/2-transport-networking.md) | Stage 1 TCP, Stage 4 UDP |
+| [3 · HTTP, TLS and proxies](_networking-lessons/3-http-tls-proxies.md) | Stage 2 HTTP proxy, Stage 3 SOCKS5 |
+| [4 · Advanced network concepts](_networking-lessons/4-advanced-network-concepts.md) | Stage 7 VPN (NAT, firewall), Stage 9 multi-peer (NAT traversal) |
+| [5 · Tunneling](_networking-lessons/5-tunneling.md) | Stage 5 Tunnel |
+| [6 · TUN / TAP](_networking-lessons/6-tun-tap.md) | Stage 6 TUN |
+| [7 · VPN architecture](_networking-lessons/7-vpn-architecture.md) | Stage 7 VPN |
+| [8 · Security and cryptography](_networking-lessons/8-security-cryptography.md) | Stage 8 Encryption |
+| [9 · Multi-peer networking](_networking-lessons/9-multi-peer-networking.md) | Stage 9 Multi-peer |
 
 ## Now
 

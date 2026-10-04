@@ -28,6 +28,8 @@ const (
 
 // Run accepts SOCKS5 clients on Addr.
 // It only returns if the listener cannot start.
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#socks5-concept
 func Run() error {
 	ln, err := net.Listen("tcp", Addr)
 	if err != nil {
@@ -68,9 +70,12 @@ func handle(client net.Conn) {
 //
 //	client -> server:  VER  NMETHODS  METHODS...   e.g. 05 01 00
 //	server -> client:  VER  METHOD                 e.g. 05 00 (no authentication)
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#socks5-handshake
 func greet(conn net.Conn) error {
 	// Length-prefix framing: a fixed 2-byte header, and its second byte says how many bytes follow.
 	// io.ReadFull keeps reading until it has exactly len(buf) bytes, however TCP splits them.
+	// Theory: _networking-lessons/2-transport-networking.md#tcp-is-a-byte-stream
 	head := make([]byte, 2)
 	if _, err := io.ReadFull(conn, head); err != nil {
 		return err
@@ -100,6 +105,8 @@ func greet(conn net.Conn) error {
 //	VER  CMD  RSV  ATYP  DST.ADDR                DST.PORT
 //	05   01   00   03    0b "example.com"        00 50     (domain, port 80)
 //	05   01   00   01    5d b8 d7 0e             01 bb     (IPv4, port 443)
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#socks5-concept
 func readRequest(conn net.Conn) (string, error) {
 	head := make([]byte, 4)
 	if _, err := io.ReadFull(conn, head); err != nil {
@@ -127,6 +134,7 @@ func readRequest(conn net.Conn) (string, error) {
 		host = net.IP(ip).String()
 	case atypDomain:
 		// A name has no fixed size, so it is length-prefixed: 1 byte of length, then the name.
+		// Theory: _networking-lessons/3-http-tls-proxies.md#dns-with-socks5
 		n := make([]byte, 1)
 		if _, err := io.ReadFull(conn, n); err != nil {
 			return "", err
