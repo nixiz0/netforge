@@ -64,13 +64,13 @@ func handle(client net.Conn) {
 	}
 	log.Printf("%s greeting done, no authentication", client.RemoteAddr())
 
-	target, err := readRequest(client)
+	target, atyp, err := readRequest(client)
 	if err != nil {
 		log.Printf("%s request: %v", client.RemoteAddr(), err)
 		reply(client, repGeneralFailure, nil)
 		return
 	}
-	log.Printf("%s CONNECT %s", client.RemoteAddr(), target)
+	log.Printf("%s CONNECT %s (%s)", client.RemoteAddr(), target, resolvedBy(atyp))
 
 	// Client toward the target: a second TCP connection, exactly like the HTTP proxy.
 	// Theory: _networking-lessons/3-http-tls-proxies.md#forward-proxy
@@ -129,23 +129,23 @@ func greet(conn net.Conn) error {
 	return errors.New("client offers no method we support")
 }
 
-// readRequest reads the CONNECT request and returns the target as "host:port":
+// readRequest reads the CONNECT request and returns the target as "host:port" and its address type:
 //
 //	VER  CMD  RSV  ATYP  DST.ADDR                DST.PORT
 //	05   01   00   03    0b "example.com"        00 50     (domain, port 80)
 //	05   01   00   01    5d b8 d7 0e             01 bb     (IPv4, port 443)
 //
 // Theory: _networking-lessons/3-http-tls-proxies.md#socks5-concept
-func readRequest(conn net.Conn) (string, error) {
+func readRequest(conn net.Conn) (string, byte, error) {
 	head := make([]byte, 4)
 	if _, err := io.ReadFull(conn, head); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if head[0] != version5 {
-		return "", fmt.Errorf("bad version byte %#x", head[0])
+		return "", 0, fmt.Errorf("bad version byte %#x", head[0])
 	}
 	if head[1] != cmdConnect {
-		return "", fmt.Errorf("unsupported command %#x", head[1])
+		return "", 0, fmt.Errorf("unsupported command %#x", head[1])
 	}
 
 	// The address type (ATYP) says how many bytes the address takes.
@@ -158,7 +158,7 @@ func readRequest(conn net.Conn) (string, error) {
 		}
 		ip := make([]byte, size)
 		if _, err := io.ReadFull(conn, ip); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		host = net.IP(ip).String()
 	case atypDomain:
@@ -166,23 +166,23 @@ func readRequest(conn net.Conn) (string, error) {
 		// Theory: _networking-lessons/3-http-tls-proxies.md#dns-with-socks5
 		n := make([]byte, 1)
 		if _, err := io.ReadFull(conn, n); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		name := make([]byte, n[0])
 		if _, err := io.ReadFull(conn, name); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		host = string(name)
 	default:
-		return "", fmt.Errorf("unknown address type %#x", head[3])
+		return "", 0, fmt.Errorf("unknown address type %#x", head[3])
 	}
 
 	// Port: 2 bytes in network byte order (big-endian, high byte first): 00 50 = 0*256 + 80 = 80.
 	port := make([]byte, 2)
 	if _, err := io.ReadFull(conn, port); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port)))), nil
+	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port)))), head[3], nil
 }
 
 // reply sends the answer to the CONNECT request:
@@ -210,4 +210,16 @@ func reply(conn net.Conn, rep byte, bind net.Addr) error {
 
 	_, err := conn.Write(msg)
 	return err
+}
+
+// resolvedBy says who turned the name into an IP address, from the request's address type.
+// A domain name means the proxy resolves it (DNS leaves from the proxy's network);
+// an IP means the client already asked its own resolver, outside the proxy.
+//
+// Theory: _networking-lessons/3-http-tls-proxies.md#dns-with-socks5
+func resolvedBy(atyp byte) string {
+	if atyp == atypDomain {
+		return "domain name: the proxy resolves it"
+	}
+	return "IP address: the client resolved it"
 }

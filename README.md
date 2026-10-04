@@ -22,14 +22,15 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080` and a working SOCKS5 proxy on `127.0.0.1:1080` (no auth, TCP CONNECT). Next: who resolves DNS, client or proxy (step 3.5).
+Step 3 (SOCKS5) done: HTTP/HTTPS forward proxy on `127.0.0.1:8080` and SOCKS5 proxy on `127.0.0.1:1080` (no auth, TCP CONNECT, proxy-side or client-side DNS). Next: UDP (step 4).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
 curl.exe -x http://127.0.0.1:8080 https://example.com/
 
 go run ./cmd/netforge socks                                # SOCKS5
-curl.exe --socks5-hostname 127.0.0.1:1080 https://example.com/
+curl.exe --socks5-hostname 127.0.0.1:1080 https://example.com/   # the proxy resolves DNS
+curl.exe --socks5 127.0.0.1:1080 https://example.com/            # curl resolves DNS itself
 ```
 
 ## Roadmap
@@ -61,7 +62,7 @@ Binary protocol, IPv4/IPv6, DNS.
 - [x] 3.2 Read the CONNECT request (address type, big-endian port)
 - [x] 3.3 Share the relay: move it to `internal/relay`
 - [x] 3.4 Connect, reply, relay: a working SOCKS5 proxy
-- [ ] 3.5 DNS: client-side vs proxy-side resolution
+- [x] 3.5 DNS: client-side vs proxy-side resolution
 
 ### 4 — UDP
 Datagrams.

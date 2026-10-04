@@ -72,7 +72,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 ## SOCKS5 internals (`internal/socks`)
 
 1. `greet`: `VER NMETHODS METHODS…` read with `io.ReadFull`; reply `05 00` if "no auth" (0x00) is offered, else `05 FF` and close.
-2. `readRequest`: `VER CMD RSV ATYP ADDR PORT`; only `CMD=01` (CONNECT); address by type (IPv4 4 bytes, domain length-prefixed, IPv6 16 bytes); port big-endian.
+2. `readRequest`: `VER CMD RSV ATYP ADDR PORT`; only `CMD=01` (CONNECT); address by type (IPv4 4 bytes, domain length-prefixed, IPv6 16 bytes); port big-endian. The log says who resolved DNS: `ATYP=03` domain → the proxy (`net.DialTimeout` resolves it), IP → the client did, outside the proxy (DNS leak).
 3. Dial the target (5 s). Reply `05 REP 00 ATYP BND.ADDR BND.PORT` via `reply()`: `00` success with the proxy's local end of the upstream connection, `04` host unreachable, `01` bad request.
 4. `relay.Pipe(client, client, upstream)`: no bufio anywhere in SOCKS5, so the raw conn is safe to read.
 
@@ -112,7 +112,7 @@ All content of `docs/blueprint.html` is driven by the data block at the top of i
 | `NODES` | Map nodes at fixed coordinates (viewBox 1000×610); `script` links a node to its Go file |
 | `LINKS` | Lines between nodes; third item `1` = loopback (dashed) |
 | `FILES` | Script card per Go file: role, run command, functions |
-| `SCENARIOS` | What the system can do. Per scenario: `run` (commands), `boot` (startup logs), `steps` = packets: `p` path of node ids, `t` layer, `l` label, `f` Go file, `c` Go code, `k` concept, `s` one-line explanation, `log` lines the programs print |
+| `SCENARIOS` | What the system can do. Per scenario: `run` (commands), `boot` (startup logs), `steps` = packets: `p` path of node ids (`"@x,y"` waypoints allowed in the middle to route around nodes), `t` layer, `l` label, `f` Go file, `c` Go code, `k` concept, `s` one-line explanation, `log` lines the programs print |
 | `LESSONS`, `THEORY` | Base URL of `_networking-lessons/` on GitHub, and concept (`k`) → `"file.md#anchor|Section title"`. Every step's `k` needs an entry; infrastructure nodes carry their own `th` |
 | `ROADMAP` | 9 stages with `done` / `next` state |
 
