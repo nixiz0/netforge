@@ -24,10 +24,11 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
+| `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 | `_networking-lessons/` | Networking theory, one Markdown file per topic. The `_` prefix sorts it first and makes the Go tool ignore it | read on GitHub |
 
-Dependency rule: `cmd/netforge` imports the feature packages; feature packages may import shared helper packages (`internal/relay`) but never each other. When a helper is needed by two features, move it to its own `internal/<name>` package.
+Dependency rule: `cmd/netforge` imports the feature packages; feature packages may import shared helper packages (`internal/relay`, `internal/resolve`) but never each other. When a helper is needed by two features, move it to its own `internal/<name>` package.
 
 ## Runtime model
 
@@ -36,7 +37,7 @@ Dependency rule: `cmd/netforge` imports the feature packages; feature packages m
 - **One goroutine per accepted connection.** Per-connection errors are logged and the connection dropped; the server keeps running.
 - **Relay pattern** (`relay.Pipe`, and the stdin/stdout variant in `dial.Run`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
 - **Half-close propagation:** when one side sends FIN, forward it with `CloseWrite()` (if the connection supports it), never `Close()`, so in-flight bytes in the other direction are not lost. Full close happens via `defer` on both connections when the function returns.
-- **Timeouts:** outbound dials use `net.DialTimeout(..., 5*time.Second)`. No read/write/idle deadlines yet.
+- **Outbound dials:** the proxies use `resolve.Dial(target, 5*time.Second)`: the DNS lookup is explicit and logged (`resolved example.com → … in 12ms`), then each address is tried with a 5 s timeout. `dial` still uses plain `net.DialTimeout`. No read/write/idle deadlines yet.
 - **Binding:** everything listens on loopback (`127.0.0.1`) by design. Exposing on `0.0.0.0` needs auth first.
 
 ## Data path: buffers and relay
@@ -80,6 +81,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 
 - Only the first request per client connection is parsed; later requests on a kept-alive connection go to the first target.
 - Hop-by-hop headers (`Proxy-Connection`, `Connection`, ...) are forwarded untouched.
+- `resolve.Dial` tries addresses one by one (IPv4 first), without Happy Eyeballs racing; a dead first address costs up to 5 s.
 - SOCKS5: no username/password auth, no `BIND` / `UDP ASSOCIATE`; every dial failure is reported as `04` host unreachable (refused vs timeout is not distinguished).
 - No auth, no access control, no metrics; logging is `log` to stderr.
 - `io.Copy` errors inside `relay.Pipe` are ignored (closing races produce expected "use of closed connection" errors).

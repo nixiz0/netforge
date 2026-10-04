@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nixiz0/netforge/internal/relay"
+	"github.com/nixiz0/netforge/internal/resolve"
 )
 
 // Addr is where the proxy listens: loopback only.
@@ -68,7 +69,10 @@ func handle(client net.Conn) {
 	// Theory: _networking-lessons/3-http-tls-proxies.md#http-connect
 	// Theory: _networking-lessons/3-http-tls-proxies.md#what-the-connect-proxy-can-still-know
 	if method == "CONNECT" {
-		upstream, err := net.DialTimeout("tcp", rawURL, 5*time.Second)
+		upstream, lk, err := resolve.Dial(rawURL, 5*time.Second)
+		if lk != nil {
+			log.Printf("%s resolved %s", client.RemoteAddr(), lk)
+		}
 		if err != nil {
 			log.Println("dial:", err)
 			io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
@@ -103,7 +107,10 @@ func handle(client net.Conn) {
 
 	// Client toward the target: a second, separate TCP connection (its own handshake, its own 4-tuple).
 	// Theory: _networking-lessons/2-transport-networking.md#ports-and-connection-identity
-	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
+	upstream, lk, err := resolve.Dial(target, 5*time.Second)
+	if lk != nil {
+		log.Printf("%s resolved %s", client.RemoteAddr(), lk)
+	}
 	if err != nil {
 		log.Println("dial:", err)
 		io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")

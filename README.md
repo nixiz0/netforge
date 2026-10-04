@@ -63,6 +63,7 @@ Binary protocol, IPv4/IPv6, DNS.
 - [x] 3.3 Share the relay: move it to `internal/relay`
 - [x] 3.4 Connect, reply, relay: a working SOCKS5 proxy
 - [x] 3.5 DNS: client-side vs proxy-side resolution
+- [x] 3.6 Explicit DNS lookups in both proxies, logged with timing
 
 ### 4 — UDP
 Datagrams.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nixiz0/netforge/internal/relay"
+	"github.com/nixiz0/netforge/internal/resolve"
 )
 
 // Addr is where the SOCKS5 server listens: loopback only, standard SOCKS port.
@@ -74,7 +75,10 @@ func handle(client net.Conn) {
 
 	// Client toward the target: a second TCP connection, exactly like the HTTP proxy.
 	// Theory: _networking-lessons/3-http-tls-proxies.md#forward-proxy
-	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
+	upstream, lk, err := resolve.Dial(target, 5*time.Second)
+	if lk != nil {
+		log.Printf("%s resolved %s", client.RemoteAddr(), lk)
+	}
 	if err != nil {
 		log.Println("dial:", err)
 		reply(client, repHostUnreachable, nil)

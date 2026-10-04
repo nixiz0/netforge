@@ -208,7 +208,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.5", what: "SOCKS5 DNS: proxy vs client" };
+const SYNC = { step: "3.6", what: "DNS lookups logged" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
@@ -235,6 +235,7 @@ const FILES = {
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
+  "internal/resolve/resolve.go": { role: "Explicit DNS lookup, timed and logged, then dial (used by proxy and socks)", cmd: "library, no command", fns: [["resolve.Dial(target, timeout)", "LookupHost, then try each IP, IPv4 first"], ["(*Lookup).String()", "\"example.com → 203.0.113.10 in 12ms\""], ["ipv4First(ips)", "IPv4 before IPv6"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
@@ -291,8 +292,8 @@ const SCENARIOS = {
       { p: ["term", "proxy"], t: "data", l: "GET http://example.com/", f: "internal/proxy/proxy.go", c: "br := bufio.NewReader(client) · readHead(br)", k: "Absolute-form request · bufio", s: "The request line carries the full URL. bufio pulls a 4 KB chunk, hands back the head line by line and keeps any extra bytes.",
         log: [["proxy", "127.0.0.1:52350 request line: \"GET http://example.com/ HTTP/1.1\\r\\n\""]] },
       { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "url.Parse(rawURL) → example.com:80", k: "Target from the URL", s: "No port in the URL means 80. Then a DNS lookup." },
-      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "The proxy resolves the name, not curl." },
-      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", target, 5s)", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/resolve/resolve.go", c: "net.DefaultResolver.LookupHost(ctx, host)", k: "DNS answer", s: "The proxy resolves the name, not curl.", log: [["proxy", "127.0.0.1:52350 resolved example.com → 203.0.113.10 in 12ms"]] },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "resolve.Dial → net.DialTimeout(ip:port, 5s), IPv4 first", k: "Client toward the site", s: "Connection 2: its own handshake, its own 4-tuple.",
         log: [["proxy", "127.0.0.1:52350 -> proxy -> 203.0.113.10:80"]] },
       { p: ["proxy", "router", "site"], t: "data", l: "GET / HTTP/1.1", f: "internal/proxy/proxy.go", c: "head[0] = method + \" \" + u.RequestURI() + …", k: "Origin-form rewrite", s: "The site expects only the path." },
       { p: ["site", "router", "proxy"], t: "data", l: "200 OK + HTML", f: "internal/relay/relay.go", c: "relay.Pipe: io.Copy(client, upstream)", k: "Relay", s: "The answer arrives on connection 2…" },
@@ -308,9 +309,9 @@ const SCENARIOS = {
       { p: ["term", "proxy"], t: "ctl", l: "handshake #1", f: "internal/proxy/proxy.go", c: "ln.Accept() → go handle(client)", k: "Server toward the client", s: "Connection 1: curl to 127.0.0.1:8080." },
       { p: ["term", "proxy"], t: "data", l: "CONNECT example.com:443", f: "internal/proxy/proxy.go", c: "readHead(br) → method == \"CONNECT\"", k: "HTTP CONNECT · bufio", s: "Only host:port travels in clear text. bytes after the head (the TLS ClientHello) may already sit in br, so the relay reads through br.",
         log: [["proxy", "127.0.0.1:52351 request line: \"CONNECT example.com:443 HTTP/1.1\\r\\n\""]] },
-      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "DNS lookup", s: "The proxy resolves the name." },
-      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/proxy/proxy.go", c: "Go's resolver", k: "DNS answer", s: "Now it can connect to port 443." },
-      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "net.DialTimeout(\"tcp\", rawURL, 5s)", k: "Client toward the site", s: "Connection 2 to the website.",
+      { p: ["proxy", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/proxy/proxy.go", c: "resolve.Dial(rawURL, 5*time.Second)", k: "DNS lookup", s: "The proxy resolves the name." },
+      { p: ["dns", "router", "proxy"], t: "dns", l: "203.0.113.10", f: "internal/resolve/resolve.go", c: "net.DefaultResolver.LookupHost(ctx, host)", k: "DNS answer", s: "Now it can connect to port 443.", log: [["proxy", "127.0.0.1:52351 resolved example.com → 203.0.113.10 in 12ms"]] },
+      { p: ["proxy", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/proxy/proxy.go", c: "resolve.Dial → net.DialTimeout(ip:port, 5s), IPv4 first", k: "Client toward the site", s: "Connection 2 to the website.",
         log: [["proxy", "127.0.0.1:52351 -> proxy -> 203.0.113.10:443 (CONNECT tunnel)"]] },
       { p: ["proxy", "term"], t: "data", l: "200 Connection Established", f: "internal/proxy/proxy.go", c: "io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\")", k: "Tunnel open", s: "From now on the proxy relays bytes it cannot read." },
       { p: ["term", "proxy", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, br, upstream)", k: "Relay · TLS end to end", s: "relay.Pipe now copies blindly both ways. The handshake crosses the proxy untouched; only the SNI name is visible." },
@@ -330,9 +331,9 @@ const SCENARIOS = {
         log: [["socks", "127.0.0.1:52360 greeting done, no authentication"]] },
       { p: ["term", "socks"], t: "data", l: "05 01 00 03 0b example.com 01 bb", f: "internal/socks/socks.go", c: "readRequest(conn)", k: "Typed address + big-endian port", s: "CONNECT, type 03 = domain (length 0x0b = 11, then the name), port 01 bb = 443.",
         log: [["socks", "127.0.0.1:52360 CONNECT example.com:443 (domain name: the proxy resolves it)"]] },
-      { p: ["socks", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/socks/socks.go", c: "net.DialTimeout(\"tcp\", target, 5*time.Second)", k: "Proxy-side DNS", s: "With --socks5-hostname curl sent a name, so the DNS query leaves from the proxy, not from curl." },
-      { p: ["dns", "router", "socks"], t: "dns", l: "203.0.113.10", f: "internal/socks/socks.go", c: "Go's resolver", k: "DNS answer", s: "Now the proxy can open its own connection." },
-      { p: ["socks", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/socks/socks.go", c: "net.DialTimeout(\"tcp\", target, 5*time.Second)", k: "Client toward the site", s: "Connection 2: the proxy becomes the client, same as the HTTP proxy.",
+      { p: ["socks", "router", "dns"], t: "dns", l: "A? example.com", f: "internal/socks/socks.go", c: "resolve.Dial(target, 5*time.Second)", k: "Proxy-side DNS", s: "With --socks5-hostname curl sent a name, so the DNS query leaves from the proxy, not from curl." },
+      { p: ["dns", "router", "socks"], t: "dns", l: "203.0.113.10", f: "internal/resolve/resolve.go", c: "net.DefaultResolver.LookupHost(ctx, host)", k: "DNS answer", s: "Now the proxy can open its own connection.", log: [["socks", "127.0.0.1:52360 resolved example.com → 203.0.113.10 in 12ms"]] },
+      { p: ["socks", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/socks/socks.go", c: "resolve.Dial → net.DialTimeout(ip:port, 5s), IPv4 first", k: "Client toward the site", s: "Connection 2: the proxy becomes the client, same as the HTTP proxy.",
         log: [["socks", "127.0.0.1:52360 -> socks -> 203.0.113.10:443"]] },
       { p: ["socks", "term"], t: "data", l: "05 00 00 01 c0 a8 01 14 ce 18", f: "internal/socks/socks.go", c: "reply(client, repSuccess, upstream.LocalAddr())", k: "SOCKS5 reply", s: "Success (00) + the proxy's own end of connection 2: 192.168.1.20:52760, port big-endian." },
       { p: ["term", "socks", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, client, upstream)", k: "Data is relayed", s: "Handshake step 4. From now on SOCKS5 copies bytes blindly; it never knew this was HTTPS." },
@@ -352,7 +353,7 @@ const SCENARIOS = {
       { p: ["socks", "term"], t: "data", l: "05 00", f: "internal/socks/socks.go", c: "conn.Write([]byte{version5, methodNoAuth})", k: "Method chosen", s: "No authentication.", log: [["socks", "127.0.0.1:52370 greeting done, no authentication"]] },
       { p: ["term", "socks"], t: "data", l: "05 01 00 01 cb 00 71 0a 01 bb", f: "internal/socks/socks.go", c: "readRequest(conn) → atyp 01", k: "Client-side DNS", s: "Address type 01 = IPv4: 4 raw bytes (203.0.113.10). No name ever reaches the proxy.",
         log: [["socks", "127.0.0.1:52370 CONNECT 203.0.113.10:443 (IP address: the client resolved it)"]] },
-      { p: ["socks", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/socks/socks.go", c: "net.DialTimeout(\"tcp\", target, 5*time.Second)", k: "Client toward the site", s: "No DNS query from the proxy this time: it already has an IP.",
+      { p: ["socks", "router", "site"], t: "ctl", l: "handshake #2", f: "internal/socks/socks.go", c: "resolve.Dial → net.DialTimeout(ip:port, 5s), IPv4 first", k: "Client toward the site", s: "No DNS query from the proxy this time: it already has an IP.",
         log: [["socks", "127.0.0.1:52370 -> socks -> 203.0.113.10:443"]] },
       { p: ["socks", "term"], t: "data", l: "05 00 00 01 c0 a8 01 14 ce 19", f: "internal/socks/socks.go", c: "reply(client, repSuccess, upstream.LocalAddr())", k: "SOCKS5 reply", s: "Success. From here it is the same blind relay." },
       { p: ["term", "socks", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, client, upstream)", k: "Data is relayed", s: "Traffic is proxied, but the DNS lookup already leaked. That is why browsers offer \"Proxy DNS when using SOCKS v5\"." }
