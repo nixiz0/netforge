@@ -24,17 +24,15 @@ func main() {
 	case "echo":
 		err = echo.Run(defaultAddr)
 	case "dial":
-		addr := defaultAddr
-		if len(os.Args) > 2 {
-			addr = os.Args[2]
-		}
-		err = dial.Run(addr)
+		err = dial.Run(addrArg())
 	case "proxy":
 		err = proxy.Run()
 	case "socks":
 		err = socks.Run()
 	case "udpecho":
 		err = echo.RunUDP(defaultAddr)
+	case "udpdial":
+		err = dial.RunUDP(addrArg())
 	default:
 		usage()
 	}
@@ -52,5 +50,14 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  proxy           HTTP forward proxy on "+proxy.Addr)
 	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (no auth, CONNECT)")
 	fmt.Fprintln(os.Stderr, "  udpecho         UDP echo server on "+defaultAddr+" (same port number as echo, separate UDP port space)")
+	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	os.Exit(2)
+}
+
+// addrArg returns the optional address argument (os.Args[2]), or defaultAddr when it is missing.
+func addrArg() string {
+	if len(os.Args) > 2 {
+		return os.Args[2]
+	}
+	return defaultAddr
 }

@@ -20,7 +20,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 |---|---|---|
 | `cmd/netforge/main.go` | Subcommand router on `os.Args[1]`, `usage()` exits 2 | `main()` |
 | `internal/echo/` | Echo server on `127.0.0.1:9000`: TCP (`echo.go`) and UDP (`udp.go`, same port number, separate port space) | `echo.Run(addr)`, `echo.RunUDP(addr)` |
-| `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
+| `internal/dial/` | Interactive clients: TCP (`dial.go`, stdin ⇄ conn) and UDP (`udp.go`, one line = one datagram) | `dial.Run(addr)`, `dial.RunUDP(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |

@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "4.1", what: "UDP echo server" };
+const SYNC = { step: "4.2", what: "UDP client" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -234,6 +234,7 @@ const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/echo/udp.go": { role: "UDP echo server on 127.0.0.1:9000/udp", cmd: "go run ./cmd/netforge udpecho", fns: [["echo.RunUDP(addr)", "ListenPacket, then one ReadFrom/WriteTo loop for every client"]] },
+  "internal/dial/udp.go": { role: "UDP client: each typed line is one datagram", cmd: "go run ./cmd/netforge udpdial [addr]", fns: [["dial.RunUDP(addr)", "net.Dial(\"udp\"), reader goroutine, one Write per line"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
@@ -363,15 +364,20 @@ const SCENARIOS = {
   },
   udp: {
     name: "UDP echo", blurb: "No connection: datagrams go out with no handshake, come back to the sender's address, and nothing is ever closed.",
-    run: ["go run ./cmd/netforge udpecho", "$u = [Net.Sockets.UdpClient]::new(); $u.Connect(\"127.0.0.1\", 9000); $b = [Text.Encoding]::ASCII.GetBytes(\"hello udp\"); [void]$u.Send($b, $b.Length)"], boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"]],
+    run: ["go run ./cmd/netforge udpecho", "go run ./cmd/netforge udpdial"], boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"]],
     steps: [
-      { p: ["dial", "echo"], t: "udp", l: "\"hello udp\"", f: "internal/echo/udp.go", c: "client: PowerShell UdpClient.Send (netforge udpdial comes in 4.2)", k: "No handshake", s: "The very first packet already carries data: no SYN, no connection to set up.",
-        log: [["echo", "9 bytes from 127.0.0.1:61000: \"hello udp\""]] },
-      { p: ["echo", "dial"], t: "udp", l: "\"hello udp\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "There is no connection to answer on: the reply is addressed to where the datagram came from." },
-      { p: ["dial", "echo"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "n, from, err := pc.ReadFrom(buf)", k: "Datagram boundaries", s: "Each ReadFrom returns exactly one datagram, never two glued together (unlike TCP in step 1.5).",
-        log: [["echo", "6 bytes from 127.0.0.1:61000: \"second\""]] },
-      { p: ["echo", "dial"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "Same socket, same loop: one goroutine serves every client." },
-      { p: ["dial"], t: "udp", l: "no FIN", f: "internal/echo/udp.go", c: "nothing to close", k: "Nothing to close", s: "The client simply stops. No FIN, no TIME_WAIT: the server never knew a connection existed." }
+      { p: ["dial"], t: "udp", l: "no SYN", f: "internal/dial/udp.go", c: "net.Dial(\"udp\", addr)", k: "Connected UDP", s: "net.Dial(\"udp\") only records a default peer locally. Nothing goes on the wire.",
+        log: [["dial", "UDP socket 127.0.0.1:61000 -> 127.0.0.1:9000 (no handshake sent)"]] },
+      { p: ["dial", "echo"], t: "udp", l: "\"hello udp\"", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "No handshake", s: "The very first packet already carries data: one typed line, one datagram.",
+        log: [["dial", "-> 9 bytes: \"hello udp\""], ["echo", "9 bytes from 127.0.0.1:61000: \"hello udp\""]] },
+      { p: ["echo", "dial"], t: "udp", l: "\"hello udp\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "There is no connection to answer on: the reply is addressed to where the datagram came from.",
+        log: [["dial", "<- 9 bytes: \"hello udp\""]] },
+      { p: ["dial", "echo"], t: "udp", l: "\"second\"", f: "internal/dial/udp.go", c: "conn.Write(msg) · pc.ReadFrom(buf)", k: "Datagram boundaries", s: "Sent right after the first, yet it arrives alone: one Write = one datagram = one Read (unlike TCP in step 1.5).",
+        log: [["dial", "-> 6 bytes: \"second\""], ["echo", "6 bytes from 127.0.0.1:61000: \"second\""]] },
+      { p: ["echo", "dial"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "Same socket, same loop: one goroutine serves every client.",
+        log: [["dial", "<- 6 bytes: \"second\""]] },
+      { p: ["dial"], t: "udp", l: "no FIN", f: "internal/dial/udp.go", c: "time.Sleep(time.Second) (4.3: read deadline)", k: "Nothing to close", s: "Ctrl+Z: the client waits a moment for late replies, then just stops. No FIN: the server never knew.",
+        log: [["dial", "stdin closed; UDP has no FIN, nothing to close on the wire"]] }
     ]
   }
 };
@@ -398,7 +404,7 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "next"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];

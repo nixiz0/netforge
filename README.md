@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. UDP started: a UDP echo server on `127.0.0.1:9000/udp`. Next: a UDP client (step 4.2).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. UDP: echo server on `127.0.0.1:9000/udp` and a UDP client where each typed line is one datagram. Next: loss is silent (step 4.3).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -33,6 +33,7 @@ curl.exe --socks5-hostname 127.0.0.1:1080 https://example.com/   # the proxy res
 curl.exe --socks5 127.0.0.1:1080 https://example.com/            # curl resolves DNS itself
 
 go run ./cmd/netforge udpecho                              # UDP echo on 127.0.0.1:9000/udp
+go run ./cmd/netforge udpdial                              # each line = one datagram
 ```
 
 ## Roadmap
@@ -71,7 +72,7 @@ Binary protocol, IPv4/IPv6, DNS.
 Datagrams.
 
 - [x] 4.1 UDP echo server: one socket, no handshake, sender address per datagram
-- [ ] 4.2 UDP client: one write = one datagram, boundaries kept
+- [x] 4.2 UDP client: one write = one datagram, boundaries kept
 - [ ] 4.3 Loss is silent: read deadlines, closed ports
 - [ ] 4.4 Datagram size: truncation and MTU
 
@@ -102,6 +103,7 @@ netforge dial [addr]
 netforge proxy
 netforge socks
 netforge udpecho
+netforge udpdial [addr]
 ```
 
 Planned:
