@@ -19,7 +19,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | Path | Role | Entry point |
 |---|---|---|
 | `cmd/netforge/main.go` | Subcommand router on `os.Args[1]`, `usage()` exits 2 | `main()` |
-| `internal/echo/` | TCP echo server on `127.0.0.1:9000` | `echo.Run(addr)` |
+| `internal/echo/` | Echo server on `127.0.0.1:9000`: TCP (`echo.go`) and UDP (`udp.go`, same port number, separate port space) | `echo.Run(addr)`, `echo.RunUDP(addr)` |
 | `internal/dial/` | Interactive TCP client (netcat-like), stdin ⇄ conn | `dial.Run(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
@@ -35,6 +35,7 @@ Dependency rule: `cmd/netforge` imports the feature packages; feature packages m
 - **One process = one subcommand.** Servers block forever in an `Accept` loop.
 - **Packages never exit the program.** Every `Run` returns an `error` (listen or dial failure); only `cmd/netforge/main.go` calls `log.Fatal` / `os.Exit`.
 - **One goroutine per accepted connection.** Per-connection errors are logged and the connection dropped; the server keeps running.
+- **UDP servers have no connections:** one socket (`net.ListenPacket`), one `ReadFrom`/`WriteTo` loop, no goroutine per client. Each datagram carries its sender address, and each reply names its destination.
 - **Relay pattern** (`relay.Pipe`, and the stdin/stdout variant in `dial.Run`): two `io.Copy`, one per direction. The side that receives the *last* event (the peer's FIN) runs on the calling goroutine; the other runs in a goroutine and is abandoned on return. When `main` returns, all goroutines die. Nothing waits on goroutines explicitly yet.
 - **Half-close propagation:** when one side sends FIN, forward it with `CloseWrite()` (if the connection supports it), never `Close()`, so in-flight bytes in the other direction are not lost. Full close happens via `defer` on both connections when the function returns.
 - **Outbound dials:** the proxies use `resolve.Dial(target, 5*time.Second)`: the DNS lookup is explicit and logged (`resolved example.com → … in 12ms`), then each address is tried with a 5 s timeout. `dial` still uses plain `net.DialTimeout`. No read/write/idle deadlines yet.
@@ -110,7 +111,7 @@ All content of `docs/blueprint.html` is driven by the data block at the top of i
 | Block | Holds |
 |---|---|
 | `SYNC` | Current roadmap step shown in the header |
-| `LAYERS` | Packet layer filters (`ctl`, `dns`, `data`, `tls`; `lost` counts as `ctl`) |
+| `LAYERS` | Packet layer filters (`ctl`, `dns`, `data`, `tls`, `udp`; `lost` counts as `ctl`). A new layer also needs a `--t-<layer>` color token and an entry in the default `S.layers` |
 | `NODES` | Map nodes at fixed coordinates (viewBox 1000×610); `script` links a node to its Go file |
 | `LINKS` | Lines between nodes; third item `1` = loopback (dashed) |
 | `FILES` | Script card per Go file: role, run command, functions |

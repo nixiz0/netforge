@@ -32,6 +32,7 @@
   --t-data: #f3f4f8;
   --t-tls: #f4d47e;
   --t-lost: #e07a7a;
+  --t-udp: #c9a0f0;
   --font-display: "Lexend", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
 }
@@ -208,10 +209,10 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "3.6", what: "DNS lookups logged" };
+const SYNC = { step: "4.1", what: "UDP echo server" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
-const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS" };
+const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
 
 // Map nodes (viewBox 1000x580). `script` = Go file that runs there.
 const NODES = {
@@ -232,6 +233,7 @@ const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], 
 const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
+  "internal/echo/udp.go": { role: "UDP echo server on 127.0.0.1:9000/udp", cmd: "go run ./cmd/netforge udpecho", fns: [["echo.RunUDP(addr)", "ListenPacket, then one ReadFrom/WriteTo loop for every client"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
@@ -358,6 +360,19 @@ const SCENARIOS = {
       { p: ["socks", "term"], t: "data", l: "05 00 00 01 c0 a8 01 14 ce 19", f: "internal/socks/socks.go", c: "reply(client, repSuccess, upstream.LocalAddr())", k: "SOCKS5 reply", s: "Success. From here it is the same blind relay." },
       { p: ["term", "socks", "router", "site"], t: "tls", l: "ClientHello", f: "internal/relay/relay.go", c: "relay.Pipe(client, client, upstream)", k: "Data is relayed", s: "Traffic is proxied, but the DNS lookup already leaked. That is why browsers offer \"Proxy DNS when using SOCKS v5\"." }
     ]
+  },
+  udp: {
+    name: "UDP echo", blurb: "No connection: datagrams go out with no handshake, come back to the sender's address, and nothing is ever closed.",
+    run: ["go run ./cmd/netforge udpecho", "$u = [Net.Sockets.UdpClient]::new(); $u.Connect(\"127.0.0.1\", 9000); $b = [Text.Encoding]::ASCII.GetBytes(\"hello udp\"); [void]$u.Send($b, $b.Length)"], boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"]],
+    steps: [
+      { p: ["dial", "echo"], t: "udp", l: "\"hello udp\"", f: "internal/echo/udp.go", c: "client: PowerShell UdpClient.Send (netforge udpdial comes in 4.2)", k: "No handshake", s: "The very first packet already carries data: no SYN, no connection to set up.",
+        log: [["echo", "9 bytes from 127.0.0.1:61000: \"hello udp\""]] },
+      { p: ["echo", "dial"], t: "udp", l: "\"hello udp\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "There is no connection to answer on: the reply is addressed to where the datagram came from." },
+      { p: ["dial", "echo"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "n, from, err := pc.ReadFrom(buf)", k: "Datagram boundaries", s: "Each ReadFrom returns exactly one datagram, never two glued together (unlike TCP in step 1.5).",
+        log: [["echo", "6 bytes from 127.0.0.1:61000: \"second\""]] },
+      { p: ["echo", "dial"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "Same socket, same loop: one goroutine serves every client." },
+      { p: ["dial"], t: "udp", l: "no FIN", f: "internal/echo/udp.go", c: "nothing to close", k: "Nothing to close", s: "The client simply stops. No FIN, no TIME_WAIT: the server never knew a connection existed." }
+    ]
   }
 };
 
@@ -383,7 +398,7 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "next"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
@@ -402,7 +417,7 @@ const S = {
   scen: SCENARIOS[kv("nf-scen")] ? kv("nf-scen") : "https",
   idx: 0, t: 0, hold: 0, arrived: false, ending: false,
   playing: !reduce, speed: 1, pinned: null, logs: [],
-  layers: { ctl: true, dns: true, data: true, tls: true }
+  layers: { ctl: true, dns: true, data: true, tls: true, udp: true }
 };
 const SC = () => SCENARIOS[S.scen];
 const cur = () => SC().steps[S.idx];

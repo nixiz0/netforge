@@ -33,6 +33,8 @@ func main() {
 		err = proxy.Run()
 	case "socks":
 		err = socks.Run()
+	case "udpecho":
+		err = echo.RunUDP(defaultAddr)
 	default:
 		usage()
 	}
@@ -49,5 +51,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  dial [addr]     connect to addr (default "+defaultAddr+"), type to send, replies are printed")
 	fmt.Fprintln(os.Stderr, "  proxy           HTTP forward proxy on "+proxy.Addr)
 	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (no auth, CONNECT)")
+	fmt.Fprintln(os.Stderr, "  udpecho         UDP echo server on "+defaultAddr+" (same port number as echo, separate UDP port space)")
 	os.Exit(2)
 }
