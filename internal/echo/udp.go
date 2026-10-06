@@ -31,7 +31,7 @@ func RunUDP(addr string) error {
 			log.Println("read:", err)
 			continue
 		}
-		log.Printf("%d bytes from %s: %q", n, from, buf[:n])
+		log.Printf("%d bytes from %s: %.40q", n, from, buf[:n]) // %.40q: show at most the first 40 bytes
 
 		// No connection to answer on: every reply must name its destination.
 		if _, err := pc.WriteTo(buf[:n], from); err != nil {

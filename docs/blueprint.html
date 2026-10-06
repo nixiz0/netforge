@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "4.3", what: "UDP loss is silent" };
+const SYNC = { step: "4.4", what: "UDP size and MTU" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -234,7 +234,7 @@ const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/echo/udp.go": { role: "UDP echo server on 127.0.0.1:9000/udp", cmd: "go run ./cmd/netforge udpecho", fns: [["echo.RunUDP(addr)", "ListenPacket, then one ReadFrom/WriteTo loop for every client"]] },
-  "internal/dial/udp.go": { role: "UDP client: each typed line is one datagram", cmd: "go run ./cmd/netforge udpdial [addr]", fns: [["dial.RunUDP(addr)", "net.Dial(\"udp\"), one Write per line, reader goroutine counts replies, 2 s read deadline at the end"]] },
+  "internal/dial/udp.go": { role: "UDP client: each typed line is one datagram", cmd: "go run ./cmd/netforge udpdial [addr]", fns: [["dial.RunUDP(addr)", "net.Dial(\"udp\"), one Write per line, reader goroutine counts replies, 2 s read deadline at the end"], ["sizeProbe(line)", "\"+N\" → send an N-byte datagram (1472, 65507 limits)"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
@@ -393,6 +393,21 @@ const SCENARIOS = {
       { p: ["dial"], t: "lost", l: "2 s deadline", f: "internal/dial/udp.go", c: "conn.SetReadDeadline(time.Now().Add(2 * time.Second))", k: "Read deadline", s: "No FIN, no ACK, no error: only a deadline ends the wait. Counting is the only way to see loss.",
         log: [["dial", "sent 1 datagrams, got 0 replies, 1 lost or unanswered (UDP never says which)"]] }
     ]
+  },
+  udpsize: {
+    name: "UDP size", blurb: "How big can one datagram be? 1472 bytes fit one Ethernet frame; 65507 is the absolute limit.",
+    run: ["go run ./cmd/netforge udpecho", "go run ./cmd/netforge udpdial   (then type +1472, +9000, +65507, +65508)"], boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"]],
+    steps: [
+      { p: ["dial", "echo"], t: "udp", l: "+1472 → 1472 B", f: "internal/dial/udp.go", c: "sizeProbe(msg) · bytes.Repeat(\"x\", n)", k: "Fits one frame", s: "1472 = 1500 MTU − 20 IPv4 header − 8 UDP header: the largest datagram that crosses Ethernet in one piece.",
+        log: [["dial", "-> 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."], ["echo", "1472 bytes from 127.0.0.1:61002: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+      { p: ["echo", "dial"], t: "udp", l: "1472 B", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Datagram boundaries", s: "Back in one piece, as one datagram.", log: [["dial", "<- 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+      { p: ["dial", "echo"], t: "udp", l: "+9000 → 9000 B", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "Fragmentation", s: "Fine on loopback. Over Ethernet, IP would split it into 7 fragments, and losing any one loses all 9000 bytes.",
+        log: [["dial", "-> 9000 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+      { p: ["dial", "echo"], t: "udp", l: "+65507 → 65507 B", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "Max datagram", s: "65507 = 65535 (largest IPv4 packet) − 20 − 8. The biggest datagram that can exist.",
+        log: [["dial", "-> 65507 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+      { p: ["dial"], t: "lost", l: "+65508: too big", f: "internal/dial/udp.go", c: "conn.Write(msg) → error", k: "Max datagram", s: "One byte more cannot fit in an IP packet: Write fails at once, nothing is sent.",
+        log: [["dial", "send: write udp 127.0.0.1:61002->127.0.0.1:9000: wsasend: A message sent on a datagram socket was larger than the internal message buffer or some other network limit…"]] }
+    ]
   }
 };
 
@@ -418,10 +433,10 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
-const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "next"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
+const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "next"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
 const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2" };
 
 /* =================== engine =================== */

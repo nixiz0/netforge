@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. UDP: echo server on `127.0.0.1:9000/udp` and a UDP client where each typed line is one datagram, which reports lost replies. Next: datagram size and MTU (step 4.4).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Next: a tunnel (step 5).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -35,6 +35,7 @@ curl.exe --socks5 127.0.0.1:1080 https://example.com/            # curl resolves
 go run ./cmd/netforge udpecho                              # UDP echo on 127.0.0.1:9000/udp
 go run ./cmd/netforge udpdial                              # each line = one datagram
 go run ./cmd/netforge udpdial 10.255.255.1:9000            # nobody answers: silent loss
+# in udpdial, type +1472, +65507, +65508 to probe datagram size limits
 ```
 
 ## Roadmap
@@ -75,7 +76,7 @@ Datagrams.
 - [x] 4.1 UDP echo server: one socket, no handshake, sender address per datagram
 - [x] 4.2 UDP client: one write = one datagram, boundaries kept
 - [x] 4.3 Loss is silent: read deadlines, closed ports
-- [ ] 4.4 Datagram size: truncation and MTU
+- [x] 4.4 Datagram size: limits and MTU (`+N` probes)
 
 ### 5 — Tunnel
 Client/server encapsulation.
