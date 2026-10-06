@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "4.2", what: "UDP client" };
+const SYNC = { step: "4.3", what: "UDP loss is silent" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -234,7 +234,7 @@ const FILES = {
   "cmd/netforge/main.go": { role: "Command router", cmd: "go run ./cmd/netforge", fns: [["main()", "Reads os.Args[1], calls echo.Run, dial.Run or proxy.Run; exits only here on error"], ["usage()", "Prints help, exits 2"]] },
   "internal/echo/echo.go": { role: "Echo server on 127.0.0.1:9000", cmd: "go run ./cmd/netforge echo", fns: [["echo.Run(addr)", "Listen, Accept forever, one goroutine per client"], ["handle(conn)", "io.Copy(conn, conn) until FIN, then Close"]] },
   "internal/echo/udp.go": { role: "UDP echo server on 127.0.0.1:9000/udp", cmd: "go run ./cmd/netforge udpecho", fns: [["echo.RunUDP(addr)", "ListenPacket, then one ReadFrom/WriteTo loop for every client"]] },
-  "internal/dial/udp.go": { role: "UDP client: each typed line is one datagram", cmd: "go run ./cmd/netforge udpdial [addr]", fns: [["dial.RunUDP(addr)", "net.Dial(\"udp\"), reader goroutine, one Write per line"]] },
+  "internal/dial/udp.go": { role: "UDP client: each typed line is one datagram", cmd: "go run ./cmd/netforge udpdial [addr]", fns: [["dial.RunUDP(addr)", "net.Dial(\"udp\"), one Write per line, reader goroutine counts replies, 2 s read deadline at the end"]] },
   "internal/dial/dial.go": { role: "Interactive TCP client (mini netcat)", cmd: "go run ./cmd/netforge dial [addr]", fns: [["dial.Run(addr)", "DialTimeout 5 s, keyboard → server in a goroutine, server → screen in main, CloseWrite on Ctrl+Z"]] },
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
@@ -376,8 +376,22 @@ const SCENARIOS = {
         log: [["dial", "-> 6 bytes: \"second\""], ["echo", "6 bytes from 127.0.0.1:61000: \"second\""]] },
       { p: ["echo", "dial"], t: "udp", l: "\"second\"", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Reply needs an address", s: "Same socket, same loop: one goroutine serves every client.",
         log: [["dial", "<- 6 bytes: \"second\""]] },
-      { p: ["dial"], t: "udp", l: "no FIN", f: "internal/dial/udp.go", c: "time.Sleep(time.Second) (4.3: read deadline)", k: "Nothing to close", s: "Ctrl+Z: the client waits a moment for late replies, then just stops. No FIN: the server never knew.",
-        log: [["dial", "stdin closed; UDP has no FIN, nothing to close on the wire"]] }
+      { p: ["dial"], t: "udp", l: "no FIN", f: "internal/dial/udp.go", c: "conn.SetReadDeadline(time.Now().Add(2 * time.Second))", k: "Nothing to close", s: "Ctrl+Z: the client waits 2 s for late replies, then just stops. No FIN: the server never knew.",
+        log: [["dial", "sent 2 datagrams, got 2 replies, 0 lost or unanswered (UDP never says which)"]] }
+    ]
+  },
+  udploss: {
+    name: "UDP loss", blurb: "Write always succeeds. A closed port may answer with ICMP; a dead host answers nothing at all.",
+    run: ["go run ./cmd/netforge udpdial 127.0.0.1:9001", "go run ./cmd/netforge udpdial 10.255.255.1:9000"], boot: [],
+    steps: [
+      { p: ["dial", "closed"], t: "udp", l: "\"a\" → :9001", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "No connection check", s: "Nobody listens on 9001, yet Write succeeds: UDP sends without asking.",
+        log: [["dial", "-> 1 bytes: \"a\""]] },
+      { p: ["closed", "dial"], t: "ctl", l: "ICMP port unreachable", f: "internal/dial/udp.go", c: "conn.Read → error (not fatal, keep reading)", k: "ICMP feedback", s: "The local kernel answers with ICMP. Go reports it on the next Read, never on the Write.",
+        log: [["dial", "receive: read udp 127.0.0.1:61001->127.0.0.1:9001: wsarecv: An existing connection was forcibly closed by the remote host. (ICMP error for an earlier datagram)"]] },
+      { p: ["dial", "router", "void"], t: "lost", l: "\"a\" → 10.255.255.1", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "Loss is silent", s: "Over real networks the datagram just vanishes. No error, no ICMP: firewalls usually drop it.",
+        log: [["dial", "-> 1 bytes: \"a\""]] },
+      { p: ["dial"], t: "lost", l: "2 s deadline", f: "internal/dial/udp.go", c: "conn.SetReadDeadline(time.Now().Add(2 * time.Second))", k: "Read deadline", s: "No FIN, no ACK, no error: only a deadline ends the wait. Counting is the only way to see loss.",
+        log: [["dial", "sent 1 datagrams, got 0 replies, 1 lost or unanswered (UDP never says which)"]] }
     ]
   }
 };
@@ -404,7 +418,7 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "next"], ["Tunnel"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];

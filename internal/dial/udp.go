@@ -2,6 +2,7 @@ package dial
 
 import (
 	"bufio"
+	"errors"
 	"log"
 	"net"
 	"os"
@@ -9,7 +10,7 @@ import (
 )
 
 // RunUDP sends each line typed on stdin as one UDP datagram to addr and prints every datagram
-// that comes back. It returns once stdin ends.
+// that comes back. Once stdin ends it waits 2 s for late replies, then reports how many were lost.
 //
 // Theory: _networking-lessons/2-transport-networking.md#udp-essentials
 func RunUDP(addr string) error {
@@ -23,21 +24,34 @@ func RunUDP(addr string) error {
 	defer conn.Close()
 	log.Printf("UDP socket %s -> %s (no handshake sent)", conn.LocalAddr(), conn.RemoteAddr())
 
-	// Replies in the background: one Read = exactly one datagram.
+	// Replies in the background: one Read = exactly one datagram. The goroutine sends its count
+	// back on the done channel when the read deadline ends it.
+	done := make(chan int)
 	go func() {
+		received := 0
 		buf := make([]byte, 65535)
 		for {
 			n, err := conn.Read(buf)
-			if err != nil {
-				log.Println("receive:", err)
+			switch {
+			case err == nil:
+				received++
+				log.Printf("<- %d bytes: %q", n, buf[:n])
+			case errors.Is(err, os.ErrDeadlineExceeded), errors.Is(err, net.ErrClosed):
+				done <- received
 				return
+			default:
+				// The kernel got an ICMP "port unreachable" back for an earlier datagram. It shows up
+				// on a later Read, never on the Write. Not fatal: keep reading.
+				// Theory: _networking-lessons/1-network-fundamentals.md#19-icmp-ping-traceroute-and-ip-ttl
+				log.Println("receive:", err, "(ICMP error for an earlier datagram)")
 			}
-			log.Printf("<- %d bytes: %q", n, buf[:n])
 		}
 	}()
 
 	// One line = one Write = one datagram. Its boundaries survive the trip, unlike TCP's byte stream.
+	// Write succeeds even if nobody listens: UDP never checks.
 	// Theory: _networking-lessons/2-transport-networking.md#udp-preserves-datagram-boundaries
+	sent := 0
 	sc := bufio.NewScanner(os.Stdin)
 	for sc.Scan() {
 		msg := sc.Bytes()
@@ -45,12 +59,15 @@ func RunUDP(addr string) error {
 			log.Println("send:", err)
 			continue
 		}
+		sent++
 		log.Printf("-> %d bytes: %q", len(msg), msg)
 	}
 
-	// UDP has no FIN: nothing tells us the last replies have arrived, so give them a moment.
-	// Step 4.3 replaces this guess with a read deadline.
-	time.Sleep(time.Second)
-	log.Println("stdin closed; UDP has no FIN, nothing to close on the wire")
+	// UDP has no FIN and no acknowledgments: only we can decide when to stop waiting.
+	// A read deadline makes the blocked Read return an error after 2 s.
+	// Theory: _networking-lessons/2-transport-networking.md#tcp-vs-udp
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	received := <-done
+	log.Printf("sent %d datagrams, got %d replies, %d lost or unanswered (UDP never says which)", sent, received, sent-received)
 	return sc.Err()
 }
