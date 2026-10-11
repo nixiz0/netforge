@@ -12,6 +12,7 @@
 #   lab.sh tun       give both nf0 their addresses (after the netforge server and client started)
 #   lab.sh route     client: send 203.0.113.0/24 into the tunnel; host: route back to 10.10.0.0/24
 #   lab.sh forward   server: turn on IP forwarding, so it routes between nf0 and veth2
+#   lab.sh nat       host: forget the return route; server: NAT the VPN subnet behind 203.0.113.1
 #   lab.sh down      remove everything (stop the netforge processes first)
 #
 # Theory: _networking-lessons/4-advanced-network-concepts.md#linux-network-namespaces
@@ -62,6 +63,17 @@ forward)
 	ip netns exec nfpeer sysctl -qw net.ipv4.ip_forward=1
 	echo "server: IP forwarding on"
 	;;
+nat)
+	command -v iptables >/dev/null || { echo "iptables is missing: sudo apt install -y iptables" >&2; exit 1; }
+	# The host no longer knows 10.10.0.0/24, like any server on the real internet.
+	ip netns exec nfnet ip route del 10.10.0.0/24 via 203.0.113.1 2>/dev/null || true
+	# Source NAT: packets from the VPN subnet leaving through veth2 take the server's own address.
+	# The kernel's connection tracking remembers each mapping and translates the replies back.
+	# Theory: _networking-lessons/7-vpn-architecture.md#nat-on-a-vpn-server
+	# Theory: _networking-lessons/4-advanced-network-concepts.md#connection-tracking
+	ip netns exec nfpeer iptables -t nat -A POSTROUTING -s 10.10.0.0/24 -o veth2 -j MASQUERADE
+	echo "NAT: 10.10.0.0/24 leaves the server as 203.0.113.1 | host has no route to 10.10.0.0/24"
+	;;
 down)
 	ip netns del nfnet 2>/dev/null || true
 	ip netns del nfpeer 2>/dev/null || true
@@ -69,7 +81,7 @@ down)
 	echo "lab down"
 	;;
 *)
-	echo "usage: $0 up|tun|route|forward|down" >&2
+	echo "usage: $0 up|tun|route|forward|nat|down" >&2
 	exit 2
 	;;
 esac
