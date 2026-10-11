@@ -7,7 +7,8 @@ import (
 
 func testSealer(t *testing.T, fill byte) *sealer {
 	t.Helper()
-	s, err := newSealer(bytes.Repeat([]byte{fill}, keySize))
+	key := bytes.Repeat([]byte{fill}, keySize)
+	s, err := newSealer(key, key) // same key both ways: one sealer can stand for either end
 	if err != nil {
 		t.Fatal(err)
 	}

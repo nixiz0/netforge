@@ -5,11 +5,8 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync/atomic"
 )
 
@@ -30,35 +27,44 @@ const (
 	vpnMTU       = tunnelMTU - sealOverhead // 1440: the largest inner packet in VPN mode
 )
 
-// sealer encrypts and decrypts tunnel packets with one shared key.
+// sealer encrypts and decrypts tunnel packets: one key to seal what we send, another to open what
+// we receive. Both come from a handshake (handshake.go).
 type sealer struct {
-	aead cipher.AEAD
+	send, recv cipher.AEAD
 	// A nonce must never repeat with the same key. Each one is a random 4-byte prefix, drawn once
 	// at start, plus a counter: unique within a run, and a restart (counter back to 0) gets a new prefix.
 	// Theory: _networking-lessons/8-security-cryptography.md#nonces
 	prefix  [4]byte
 	counter atomic.Uint64 // shared by the send loop and the keepalive goroutine
 
-	recv replayWindow // counters already accepted from the peer; only the receive loop touches it
+	window replayWindow // counters already accepted from the peer; only the receive loop touches it
 }
 
-func newSealer(key []byte) (*sealer, error) {
+func newSealer(sendKey, recvKey []byte) (*sealer, error) {
+	send, err := newAEAD(sendKey)
+	if err != nil {
+		return nil, err
+	}
+	recv, err := newAEAD(recvKey)
+	if err != nil {
+		return nil, err
+	}
+	s := &sealer{send: send, recv: recv}
+	rand.Read(s.prefix[:]) // crypto/rand never fails: on a broken system it crashes the program instead
+	return s, nil
+}
+
+// newAEAD: symmetric cryptography, the key on our side seals what the same key on the other side opens.
+// Theory: _networking-lessons/8-security-cryptography.md#symmetric-cryptography
+func newAEAD(key []byte) (cipher.AEAD, error) {
 	if len(key) != keySize {
 		return nil, fmt.Errorf("key is %d bytes, want %d", len(key), keySize)
 	}
-	// Symmetric cryptography: both ends hold the same secret key.
-	// Theory: _networking-lessons/8-security-cryptography.md#symmetric-cryptography
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	s := &sealer{aead: aead}
-	rand.Read(s.prefix[:]) // crypto/rand never fails: on a broken system it crashes the program instead
-	return s, nil
+	return cipher.NewGCM(block)
 }
 
 // seal builds a complete tunnel packet: header, fresh nonce, then ciphertext + tag.
@@ -75,7 +81,7 @@ func (s *sealer) seal(typ byte, plaintext []byte) []byte {
 	b = append(b, header[:]...)
 	b = append(b, nonce[:]...)
 	// The header is "associated data": not encrypted, but changing one bit of it breaks the tag.
-	return s.aead.Seal(b, nonce[:], plaintext, header[:])
+	return s.send.Seal(b, nonce[:], plaintext, header[:])
 }
 
 // open checks and decrypts a sealed tunnel packet. Any change to the header, nonce, ciphertext or
@@ -92,34 +98,14 @@ func (s *sealer) open(b []byte) (packet, error) {
 		return packet{}, fmt.Errorf("sealed payload too short: %d bytes", len(pkt.payload))
 	}
 	nonce, sealed := pkt.payload[:nonceSize], pkt.payload[nonceSize:]
-	plaintext, err := s.aead.Open(nil, nonce, sealed, b[:headerSize])
+	plaintext, err := s.recv.Open(nil, nonce, sealed, b[:headerSize])
 	if err != nil {
 		return packet{}, errors.New("authentication failed: wrong key or modified packet")
 	}
 	// Authentic, but is it new? Checked after the tag, so only the real peer moves the window.
 	prefix, counter := [4]byte(nonce[:4]), binary.BigEndian.Uint64(nonce[4:])
-	if !s.recv.accept(prefix, counter) {
+	if !s.window.accept(prefix, counter) {
 		return packet{}, fmt.Errorf("replayed packet (counter %d already seen or too old)", counter)
 	}
 	return packet{typ: pkt.typ, payload: plaintext}, nil
-}
-
-// NewKey returns a random 32-byte key as 64 hex characters, for `netforge genkey`.
-func NewKey() string {
-	key := make([]byte, keySize)
-	rand.Read(key)
-	return hex.EncodeToString(key)
-}
-
-// ReadKey loads a key written by NewKey from a file.
-func ReadKey(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
-	if err != nil || len(key) != keySize {
-		return nil, fmt.Errorf("%s: want %d hex characters (netforge genkey > %s)", path, 2*keySize, path)
-	}
-	return key, nil
 }

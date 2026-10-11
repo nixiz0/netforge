@@ -22,8 +22,9 @@ func TestReplayWindow(t *testing.T) {
 		{"just out of the window", a, 100 - windowSize, false},
 		{"peer restarted", b, 1, true},
 		{"duplicate after the restart", b, 1, false},
-		// Known limit: the window only remembers one run. A packet recorded before the restart has
-		// another prefix, so it looks like yet another restart. Fresh session keys (step 8.3) fix it.
+		// The window alone only remembers one run: a packet recorded before the restart has another
+		// prefix, so it looks like yet another restart. In the VPN it never gets here: it was sealed
+		// with the previous session keys, so it fails the tag first (TestHandshake).
 		{"packet from the old run", a, 2, true},
 	}
 	for _, s := range steps { // in order: each step depends on the ones before

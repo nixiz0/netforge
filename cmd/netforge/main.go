@@ -46,17 +46,25 @@ func main() {
 			usage()
 		}
 	case "genkey":
-		fmt.Println(tunnel.NewKey())
+		fmt.Println(tunnel.GenerateKey())
+	case "pubkey":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		var pub string
+		if pub, err = tunnel.PublicKey(os.Args[2]); err == nil {
+			fmt.Println(pub)
+		}
 	case "dns":
 		err = dns.Run(addrArg(dns.Addr))
 	case "tun":
 		err = tun.Run()
 	case "vpn":
 		switch {
-		case len(os.Args) > 3 && os.Args[2] == "server":
-			err = vpn(":"+tunnel.VPNPort, "", os.Args[3])
-		case len(os.Args) > 4 && os.Args[2] == "client":
-			err = vpn(":0", os.Args[3], os.Args[4])
+		case len(os.Args) > 4 && os.Args[2] == "server":
+			err = vpn(":"+tunnel.VPNPort, "", os.Args[3], os.Args[4])
+		case len(os.Args) > 5 && os.Args[2] == "client":
+			err = vpn(":0", os.Args[3], os.Args[4], os.Args[5])
 		default:
 			usage()
 		}
@@ -81,9 +89,10 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
 	fmt.Fprintln(os.Stderr, "  dns [addr]      DNS server on addr (default "+dns.Addr+"/udp), answers A for host.lab and vpn.lab")
-	fmt.Fprintln(os.Stderr, "  genkey                            print a random 32-byte VPN key (hex)")
-	fmt.Fprintln(os.Stderr, "  vpn server <keyfile>              (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", learns its client")
-	fmt.Fprintln(os.Stderr, "  vpn client <host:port> <keyfile>  (Linux, sudo) VPN client: TUN "+tun.Name+" <-> the server, with keepalives")
+	fmt.Fprintln(os.Stderr, "  genkey                 print a new X25519 private key (hex)")
+	fmt.Fprintln(os.Stderr, "  pubkey <keyfile>       print the public key of a private key file")
+	fmt.Fprintln(os.Stderr, "  vpn server <key> <peer.pub>              (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", answers handshakes")
+	fmt.Fprintln(os.Stderr, "  vpn client <host:port> <key> <peer.pub>  (Linux, sudo) VPN client: TUN "+tun.Name+" <-> the server, handshake + keepalives")
 	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
 }
@@ -98,8 +107,12 @@ func addrArg(def string) string {
 
 // vpn opens the TUN interface and runs one end of the VPN: server mode when server is empty.
 // main wires the two packages together, so tunnel never imports tun.
-func vpn(listen, server, keyFile string) error {
-	key, err := tunnel.ReadKey(keyFile)
+func vpn(listen, server, keyFile, peerFile string) error {
+	priv, err := tunnel.ReadPrivateKey(keyFile)
+	if err != nil {
+		return err
+	}
+	peer, err := tunnel.ReadPublicKey(peerFile)
 	if err != nil {
 		return err
 	}
@@ -108,5 +121,5 @@ func vpn(listen, server, keyFile string) error {
 		return err
 	}
 	defer dev.Close()
-	return tunnel.RunTUN(dev, listen, server, key)
+	return tunnel.RunTUN(dev, listen, server, priv, peer)
 }

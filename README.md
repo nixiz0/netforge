@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) routes the client's traffic to a machine behind it (IP forwarding, split tunnel) and NATs it, so that machine only ever sees the server; a full-tunnel mode sends all of the client's traffic through the VPN, `lab.sh dns` shows that DNS lookups still leak outside it, and `netforge dns` on the server answers lookups that travel inside the tunnel, at 10.10.0.2. Step 7 (VPN) done. Encryption started: every VPN packet is sealed with AES-256-GCM and a shared key (`netforge genkey`), so the outer network only sees ciphertext and packets without the key are dropped; a replay window drops any packet received twice. Next: key exchange (step 8.3).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) routes the client's traffic to a machine behind it (IP forwarding, split tunnel) and NATs it, so that machine only ever sees the server; a full-tunnel mode sends all of the client's traffic through the VPN, `lab.sh dns` shows that DNS lookups still leak outside it, and `netforge dns` on the server answers lookups that travel inside the tunnel, at 10.10.0.2. Step 7 (VPN) done. Step 8 (Encryption) done: each end has an X25519 key pair (`netforge genkey` / `pubkey`), a 2-message handshake derives fresh session keys (forward secrecy), every packet is sealed with AES-256-GCM so the outer network only sees ciphertext, and a replay window drops any packet received twice. Next: multi-peer (step 9.1).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -55,10 +55,11 @@ curl -m 2 http://10.10.0.2/                                             # a TCP 
 The VPN between two network namespaces (Linux, inside WSL2):
 
 ```bash
-/tmp/netforge genkey > /tmp/nf.key                                                       # the shared VPN key, read by both ends
+/tmp/netforge genkey > /tmp/server.key && /tmp/netforge pubkey /tmp/server.key > /tmp/server.pub   # server key pair
+/tmp/netforge genkey > /tmp/client.key && /tmp/netforge pubkey /tmp/client.key > /tmp/client.pub   # client key pair
 sudo bash scripts/lab.sh up                                                              # namespace nfpeer + veth cable
-sudo ip netns exec nfpeer /tmp/netforge vpn server /tmp/nf.key                           # terminal 1: server, learns its client
-sudo /tmp/netforge vpn client 192.168.100.2:7000 /tmp/nf.key                             # terminal 2: client, keepalives
+sudo ip netns exec nfpeer /tmp/netforge vpn server /tmp/server.key /tmp/client.pub       # terminal 1: server, learns its client
+sudo /tmp/netforge vpn client 192.168.100.2:7000 /tmp/client.key /tmp/server.pub     # terminal 2: client, keepalives
 sudo bash scripts/lab.sh tun                                                             # client nf0 10.10.0.1, server nf0 10.10.0.2
 ping -c 3 10.10.0.2                                                                      # answered by the server's kernel
 sudo tcpdump -X -c 2 -ni veth0 udp port 7000                                             # during a ping: only ciphertext on the wire
@@ -148,7 +149,7 @@ AEAD, replay protection, key exchange.
 
 - [x] 8.1 Seal every VPN packet with AEAD (AES-256-GCM, shared key): confidentiality, integrity, no more hijack
 - [x] 8.2 Replay protection: a sliding window over packet counters
-- [ ] 8.3 Key exchange: X25519 key pairs replace the shared key
+- [x] 8.3 Key exchange: X25519 key pairs, a handshake, fresh session keys (forward secrecy)
 
 ### 9 — Multi-peer
 Peers and routes.
@@ -174,8 +175,9 @@ netforge tunnel client
 netforge dns [addr]
 netforge tun        # Linux only, sudo
 netforge genkey
-netforge vpn server <keyfile>                 # Linux only, sudo
-netforge vpn client <host:port> <keyfile>     # Linux only, sudo
+netforge pubkey <keyfile>
+netforge vpn server <key> <peer.pub>                 # Linux only, sudo
+netforge vpn client <host:port> <key> <peer.pub>     # Linux only, sudo
 ```
 
 One small step at a time. VPN is not a proxy.
