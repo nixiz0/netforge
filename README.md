@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Next: a tunnel (step 5).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Tunnel started: the tunnel packet format, with tests (`go test ./...`). Next: the tunnel server (step 5.2).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -80,6 +80,12 @@ Datagrams.
 
 ### 5 — Tunnel
 Client/server encapsulation.
+
+- [x] 5.1 Tunnel packet format: 4-byte header + payload, encode/decode, first tests
+- [ ] 5.2 Tunnel server: decapsulate, forward to the inner target, wrap replies
+- [ ] 5.3 Tunnel client: local entrance, end to end udpdial → tunnel → udpecho
+- [ ] 5.4 Overhead and tunnel MTU
+- [ ] 5.5 Keepalives and tunnel state
 
 ### 6 — TUN
 Raw IP, routing, virtual NIC.

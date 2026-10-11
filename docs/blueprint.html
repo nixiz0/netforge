@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "4.4", what: "UDP size and MTU" };
+const SYNC = { step: "5.1", what: "tunnel packet format" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -239,6 +239,7 @@ const FILES = {
   "internal/proxy/proxy.go": { role: "HTTP + HTTPS forward proxy on 127.0.0.1:8080", cmd: "go run ./cmd/netforge proxy", fns: [["proxy.Run()", "Listen on proxy.Addr, Accept, go handle"], ["handle(client)", "Read the head, CONNECT or plain HTTP, dial the target"], ["readHead(br)", "Lines until the empty \\r\\n line"]] },
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
   "internal/resolve/resolve.go": { role: "Explicit DNS lookup, timed and logged, then dial (used by proxy and socks)", cmd: "library, no command", fns: [["resolve.Dial(target, timeout)", "LookupHost, then try each IP, IPv4 first"], ["(*Lookup).String()", "\"example.com → 203.0.113.10 in 12ms\""], ["ipv4First(ips)", "IPv4 before IPv6"]] },
+  "internal/tunnel/packet.go": { role: "Tunnel packet format: VER TYPE LENGTH + payload (tested)", cmd: "go test ./internal/tunnel", fns: [["(packet).encode()", "01 TYPE LEN LEN + payload: encapsulation"], ["decode(b)", "check version and length, return the payload: decapsulation"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 

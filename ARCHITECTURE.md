@@ -9,7 +9,7 @@ Roadmap and usage live in [README.md](README.md); visual map in [docs/blueprint.
 | Language | Go 1.27.1, module `github.com/nixiz0/netforge` |
 | Dependencies | Standard library only (`net`, `io`, `bufio`, `net/url`, `log`). Keep it that way unless a stage truly needs more (e.g. TUN, crypto). |
 | Build / run | `go run ./cmd/netforge <command>` or `go build ./cmd/netforge` (binary ignored by git). Single binary, no config files, no flags yet (positional args only) |
-| Checks | `gofmt -l .` and `go vet ./...` must be clean. No automated tests yet. |
+| Checks | `gofmt -l .` and `go vet ./...` must be clean; `go test ./...` must pass. Tests exist for pure logic (binary formats); network behavior is still checked by hand. |
 | Dev platform | Windows 11 + PowerShell. Use `curl.exe` (not the `curl` alias) and `netstat -ano \| findstr <port>`. TUN/VPN stages will need Linux (VPS) for the server side. |
 
 ## Layout
@@ -23,6 +23,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/dial/` | Interactive clients: TCP (`dial.go`, stdin ⇄ conn) and UDP (`udp.go`, one line = one datagram) | `dial.Run(addr)`, `dial.RunUDP(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
+| `internal/tunnel/` | Tunnel (in progress): packet format `VER TYPE LENGTH PAYLOAD` with encode/decode and tests | (no command yet) |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
@@ -92,7 +93,8 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Each feature package exports only what `main` needs (`Run`, sometimes a constant like `proxy.Addr`); everything else stays lowercase (unexported). Exported names get a doc comment starting with the name.
 - Comments describe the **network event** a line causes (SYN, FIN, EOF, framing), not the Go syntax.
 - Every networking concept in the code links its lesson section on the line below the comment: `// Theory: _networking-lessons/<file>.md#<heading-anchor>` (GitHub anchor: heading in lowercase, spaces → `-`, punctuation dropped). New code adds the link; renamed headings update it.
-- Binary protocols (SOCKS5, later the tunnel): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
+- Tests live next to the code (`x_test.go`, same package) and are table-driven: a slice of cases, one `t.Run` per case. Every binary format gets a test for its exact bytes, a round trip, and malformed input.
+- Binary protocols (SOCKS5, the tunnel): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.
 - Every change keeps three things in sync in the same commit: the code, the README (`Now`, roadmap checkboxes, CLI `Available`/`Planned`), and `docs/blueprint.html`.
