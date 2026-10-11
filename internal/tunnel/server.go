@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log"
 	"net"
-	"sync"
+	"time"
 )
 
 // ServerAddr is the tunnel's outer endpoint: where encapsulated packets arrive.
@@ -33,11 +33,19 @@ func RunServer(target string) error {
 	defer inner.Close()
 	log.Printf("tunnel server: outer %s, inner %s -> %s", outer.LocalAddr(), inner.LocalAddr(), inner.RemoteAddr())
 
-	// Tunnel state: the client's outer address, learned from the last valid packet.
-	// Two goroutines use it, so a mutex makes sure they never read and write it at the same time.
-	// Theory: _networking-lessons/5-tunneling.md#tunnel-state
-	var mu sync.Mutex
-	var peer net.Addr
+	// Tunnel state: the client's outer address and when it was last heard (see peer in state.go).
+	var client peer
+
+	// Watchdog: a client silent for peerTimeout (no data, no keepalive) is forgotten.
+	go func() {
+		t := time.NewTicker(keepaliveInterval)
+		defer t.Stop()
+		for range t.C {
+			if gone, ok := client.expire(peerTimeout); ok {
+				log.Printf("peer %s silent for %s: forgotten", gone, peerTimeout)
+			}
+		}
+	}()
 
 	// Inner -> outer, in the background: wrap each reply from the target and send it to the peer.
 	go func() {
@@ -51,11 +59,9 @@ func RunServer(target string) error {
 				log.Println("inner read:", err)
 				continue
 			}
-			mu.Lock()
-			p := peer
-			mu.Unlock()
+			p := client.get()
 			if p == nil {
-				continue // nobody to send it to yet
+				continue // no live peer to send it to
 			}
 			// Same rule on the way back: a reply above the tunnel MTU would not fit one frame once wrapped.
 			if n > tunnelMTU {
@@ -84,9 +90,9 @@ func RunServer(target string) error {
 			log.Printf("drop %d bytes from %s: %v", n, from, err)
 			continue
 		}
-		mu.Lock()
-		peer = from
-		mu.Unlock()
+		if client.seen(from) {
+			log.Printf("peer %s joined", from)
+		}
 
 		switch pkt.typ {
 		case typeData:
@@ -94,6 +100,12 @@ func RunServer(target string) error {
 			if _, err := inner.Write(pkt.payload); err != nil {
 				log.Println("inner write:", err)
 			}
+		case typeKeepalive:
+			// Answer, so the client also knows the server is alive.
+			if _, err := outer.WriteTo(packet{typ: typeKeepalive}.encode(), from); err != nil {
+				log.Println("keepalive reply:", err)
+			}
+			log.Printf("keepalive <- %s, answered", from)
 		default:
 			log.Printf("unknown tunnel packet type %#x from %s", pkt.typ, from)
 		}

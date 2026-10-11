@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // ClientAddr is the tunnel's local entrance: apps send their datagrams here.
@@ -32,9 +33,28 @@ func RunClient(server string) error {
 	defer outer.Close()
 	log.Printf("tunnel client: entrance %s, outer %s -> %s", local.LocalAddr(), outer.LocalAddr(), outer.RemoteAddr())
 
-	// Tunnel state on this side: the local app that should receive the replies.
+	// Tunnel state on this side: the local app that should receive the replies,
+	// and whether the server is answering (see peer in state.go).
 	var mu sync.Mutex
 	var app net.Addr
+	var remote peer
+
+	// Keepalives: one tiny packet now, then every keepaliveInterval, even when idle. They keep NAT
+	// and firewall state open along the path, and the server's answers prove the tunnel is up.
+	keepalive := packet{typ: typeKeepalive}.encode()
+	outer.Write(keepalive)
+	go func() {
+		t := time.NewTicker(keepaliveInterval)
+		defer t.Stop()
+		for range t.C {
+			if _, err := outer.Write(keepalive); err != nil {
+				log.Println("keepalive:", err)
+			}
+			if _, ok := remote.expire(peerTimeout); ok {
+				log.Printf("tunnel down: no answer from the server for %s", peerTimeout)
+			}
+		}
+	}()
 
 	// Outer -> local, in the background: unwrap what the server sends back and deliver it to the app.
 	go func() {
@@ -53,8 +73,11 @@ func RunClient(server string) error {
 				log.Printf("drop %d bytes from the server: %v", n, err)
 				continue
 			}
+			if remote.seen(outer.RemoteAddr()) {
+				log.Printf("tunnel up: server %s is answering", outer.RemoteAddr())
+			}
 			if pkt.typ != typeData {
-				continue
+				continue // a keepalive answer: it already did its job by updating the state
 			}
 			mu.Lock()
 			a := app

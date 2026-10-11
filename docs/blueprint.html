@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "5.4", what: "tunnel MTU" };
+const SYNC = { step: "5.5", what: "keepalives, tunnel done" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -242,8 +242,9 @@ const FILES = {
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
   "internal/resolve/resolve.go": { role: "Explicit DNS lookup, timed and logged, then dial (used by proxy and socks)", cmd: "library, no command", fns: [["resolve.Dial(target, timeout)", "LookupHost, then try each IP, IPv4 first"], ["(*Lookup).String()", "\"example.com → 203.0.113.10 in 12ms\""], ["ipv4First(ips)", "IPv4 before IPv6"]] },
   "internal/tunnel/packet.go": { role: "Tunnel packet format: VER TYPE LENGTH + payload (tested)", cmd: "go test ./internal/tunnel", fns: [["(packet).encode()", "01 TYPE LEN LEN + payload: encapsulation"], ["decode(b)", "check version and length, return the payload: decapsulation"], ["tunnelMTU", "1500 − (20 IPv4 + 8 UDP + 4 header) = 1468"]] },
-  "internal/tunnel/client.go": { role: "Tunnel client entrance on 127.0.0.1:5300/udp", cmd: "go run ./cmd/netforge tunnel client", fns: [["tunnel.RunClient(server)", "local UDP entrance + outer socket to the server, two loops"], ["local → outer", "remember the app, drop above the tunnel MTU, encode, send"], ["outer → local", "decode, deliver the payload to the app"]] },
-  "internal/tunnel/server.go": { role: "Tunnel server endpoint on 127.0.0.1:7000/udp", cmd: "go run ./cmd/netforge tunnel server", fns: [["tunnel.RunServer(target)", "outer UDP socket + inner socket to target, two loops"], ["outer → inner", "decode, remember the peer, forward the payload"], ["inner → outer", "wrap the reply, send it to the peer"]] },
+  "internal/tunnel/state.go": { role: "Tunnel state: who the peer is and when it was last heard (tested)", cmd: "go test ./internal/tunnel", fns: [["(*peer).seen(addr)", "record a packet; true for a new or roamed peer"], ["(*peer).expire(timeout)", "forget a peer silent for too long"], ["keepaliveInterval, peerTimeout", "5 s, 15 s"]] },
+  "internal/tunnel/client.go": { role: "Tunnel client entrance on 127.0.0.1:5300/udp", cmd: "go run ./cmd/netforge tunnel client", fns: [["tunnel.RunClient(server)", "local UDP entrance + outer socket to the server, two loops"], ["local → outer", "remember the app, drop above the tunnel MTU, encode, send"], ["keepalive ticker", "01 02 00 00 every 5 s; \"tunnel down\" after 15 s of silence"], ["outer → local", "decode, deliver the payload to the app"]] },
+  "internal/tunnel/server.go": { role: "Tunnel server endpoint on 127.0.0.1:7000/udp", cmd: "go run ./cmd/netforge tunnel server", fns: [["tunnel.RunServer(target)", "outer UDP socket + inner socket to target, two loops"], ["outer → inner", "decode, remember the peer, forward the payload"], ["inner → outer", "wrap the reply, send it to the peer"], ["watchdog", "answer keepalives; forget a peer silent for 15 s"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
@@ -462,6 +463,23 @@ const SCENARIOS = {
       { p: ["tclient"], t: "lost", l: "dropped: > 1468", f: "internal/tunnel/client.go", c: "if n > tunnelMTU { … continue }", k: "Tunnel MTU", s: "The client drops it instead of sending a 1504-byte packet that would fragment. Real VPNs lower the inner MTU to avoid this.",
         log: [["tclient", "drop 1472-byte datagram from 127.0.0.1:61020: above the tunnel MTU (1468), the outer packet would exceed 1500 bytes"]] }
     ]
+  },
+  keepalive: {
+    name: "Keepalives", blurb: "Even with nobody talking, the client sends a 4-byte keepalive every 5 s. Silence for 15 s means the other side is gone.",
+    run: ["go run ./cmd/netforge tunnel server", "go run ./cmd/netforge tunnel client", "(then stop the server with Ctrl+C, restart it, and finally stop the client)"],
+    boot: [["tserver", "tunnel server: outer 127.0.0.1:7000, inner 127.0.0.1:61011 -> 127.0.0.1:9000"], ["tclient", "tunnel client: entrance 127.0.0.1:5300, outer 127.0.0.1:61021 -> 127.0.0.1:7000"]],
+    steps: [
+      { p: ["tclient", "tserver"], t: "udp", l: "01 02 00 00", f: "internal/tunnel/client.go", c: "outer.Write(packet{typ: typeKeepalive}.encode())", k: "Keepalives", s: "Type 02, length 0: a header with no payload. Sent at start, then every 5 s.",
+        log: [["tserver", "peer 127.0.0.1:61021 joined"], ["tserver", "keepalive <- 127.0.0.1:61021, answered"]] },
+      { p: ["tserver", "tclient"], t: "udp", l: "01 02 00 00", f: "internal/tunnel/server.go", c: "outer.WriteTo(packet{typ: typeKeepalive}.encode(), from)", k: "Tunnel state", s: "The server answers: now the client knows the far end is alive.",
+        log: [["tclient", "tunnel up: server 127.0.0.1:7000 is answering"]] },
+      { p: ["tclient", "tserver"], t: "udp", l: "01 02 00 00 (+5 s)", f: "internal/tunnel/client.go", c: "time.NewTicker(keepaliveInterval)", k: "NAT mapping", s: "On a real network an idle NAT mapping expires (often after ~30 s) and replies could no longer get back in. Keepalives refresh it.",
+        log: [["tserver", "keepalive <- 127.0.0.1:61021, answered"]] },
+      { p: ["tclient"], t: "lost", l: "15 s, no answer", f: "internal/tunnel/state.go", c: "remote.expire(peerTimeout)", k: "Peer timeout", s: "Server stopped: keepalives still leave, answers stop. After 3 missed intervals the client declares the tunnel down.",
+        log: [["tclient", "tunnel down: no answer from the server for 15s"]] },
+      { p: ["tserver"], t: "lost", l: "client silent 15 s", f: "internal/tunnel/state.go", c: "client.expire(peerTimeout)", k: "Peer timeout", s: "Same on the other side: stop the client and the server forgets it. Its next packet makes it a new peer again.",
+        log: [["tserver", "peer 127.0.0.1:61021 silent for 15s: forgotten"]] }
+    ]
   }
 };
 
@@ -487,10 +505,10 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Encapsulation": T5 + "encapsulation|Encapsulation", "Tunnel overhead": T5 + "tunnel-overhead|Tunnel overhead", "Tunnel MTU": T5 + "tunnel-mtu|Tunnel MTU", "Tunnel entrance": T5 + "udp-tunneling|UDP tunneling", "Point-to-point tunnel": T5 + "point-to-point-tunnel|Point-to-point tunnel", "Decapsulation": T5 + "what-is-a-tunnel|What is a tunnel?", "Inner vs outer": T5 + "inner-vs-outer-packet|Inner vs outer packet", "Tunnel state": T5 + "tunnel-state|Tunnel state", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Encapsulation": T5 + "encapsulation|Encapsulation", "Keepalives": T5 + "keepalives|Keepalives", "NAT mapping": "4-advanced-network-concepts.md#nat-mappings-from-outbound-traffic|NAT mappings from outbound traffic", "Peer timeout": T5 + "tunnel-state|Tunnel state", "Tunnel overhead": T5 + "tunnel-overhead|Tunnel overhead", "Tunnel MTU": T5 + "tunnel-mtu|Tunnel MTU", "Tunnel entrance": T5 + "udp-tunneling|UDP tunneling", "Point-to-point tunnel": T5 + "point-to-point-tunnel|Point-to-point tunnel", "Decapsulation": T5 + "what-is-a-tunnel|What is a tunnel?", "Inner vs outer": T5 + "inner-vs-outer-packet|Inner vs outer packet", "Tunnel state": T5 + "tunnel-state|Tunnel state", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
-const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "next"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
+const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "done"], ["TUN", "next"], ["VPN"], ["Encryption"], ["Multi-peer"]];
 const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2", tserver: "#9fe0b0", tclient: "#f2c78f" };
 
 /* =================== engine =================== */
