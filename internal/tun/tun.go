@@ -28,8 +28,16 @@ func Run() error {
 		if err != nil {
 			return err
 		}
-		// The first 4 bits of every IP packet are its version: 4 or 6. The first 20 bytes of an
-		// IPv4 packet are its header (step 6.2 decodes them).
-		log.Printf("packet %d bytes, IP version %d: % x", n, buf[0]>>4, buf[:min(n, 20)])
+		// The first 4 bits of every IP packet are its version: 4 or 6.
+		if buf[0]>>4 != 4 {
+			log.Printf("IPv%d packet, %d bytes (not decoded)", buf[0]>>4, n)
+			continue
+		}
+		h, err := parseIPv4(buf[:n])
+		if err != nil {
+			log.Printf("drop %d bytes: %v", n, err)
+			continue
+		}
+		log.Printf("IPv4 %s", h)
 	}
 }

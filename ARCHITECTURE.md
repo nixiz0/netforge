@@ -24,7 +24,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/tunnel/` | Point-to-point UDP tunnel: packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`), peer state and keepalive timing (`state.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)` |
-| `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `tun.go` logs packets | `tun.Run()`, `tun.Open(name)` |
+| `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `ipv4.go` decodes IPv4 headers (tested, builds everywhere), `tun.go` logs each packet | `tun.Run()`, `tun.Open(name)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
