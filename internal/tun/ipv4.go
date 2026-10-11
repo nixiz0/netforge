@@ -8,18 +8,19 @@ import (
 
 // ipv4Header holds the IPv4 header fields netforge looks at.
 type ipv4Header struct {
-	headerLen int // IHL × 4: 20 bytes without options
-	totalLen  int // header + payload
-	ttl       byte
-	protocol  byte
-	src, dst  netip.Addr
+	headerLen  int  // IHL × 4: 20 bytes without options
+	totalLen   int  // header + payload
+	fragmented bool // part of a bigger packet split by IP (more fragments follow, or offset > 0)
+	ttl        byte
+	protocol   byte
+	src, dst   netip.Addr
 }
 
 // parseIPv4 decodes the fixed part of an IPv4 header (RFC 791). Every field is big-endian:
 //
 //	byte 0     1     2  3           4  5     6  7            8    9      10 11      12-15  16-19
 //	     VER|IHL TOS  TOTAL LENGTH  IDENT    FLAGS|FRAGMENT  TTL  PROTO  CHECKSUM   SRC    DST
-//	     45      00   00 54         3a 1c    40 00           40   01     ec 6a      0a0a0001 0a0a0002
+//	     45      00   00 54         3a 1c    40 00           40   01     ec 76      0a0a0001 0a0a0002
 //
 // Theory: _networking-lessons/6-tun-tap.md#packet-parsing
 // Theory: _networking-lessons/1-network-fundamentals.md#headers
@@ -38,19 +39,28 @@ func parseIPv4(b []byte) (ipv4Header, error) {
 	if totalLen < headerLen || totalLen > len(b) {
 		return ipv4Header{}, fmt.Errorf("total length %d, but the packet has %d bytes", totalLen, len(b))
 	}
+	// Bytes 6-7: 3 flag bits, then a 13-bit fragment offset. "More fragments" (0x2000) or a non-zero
+	// offset (0x1fff) means this packet is only a piece of a bigger one.
+	// Theory: _networking-lessons/1-network-fundamentals.md#fragmentation
+	flagsOffset := binary.BigEndian.Uint16(b[6:8])
 	return ipv4Header{
-		headerLen: headerLen,
-		totalLen:  totalLen,
-		ttl:       b[8],
-		protocol:  b[9],
-		src:       netip.AddrFrom4([4]byte(b[12:16])),
-		dst:       netip.AddrFrom4([4]byte(b[16:20])),
+		headerLen:  headerLen,
+		totalLen:   totalLen,
+		fragmented: flagsOffset&0x3fff != 0,
+		ttl:        b[8],
+		protocol:   b[9],
+		src:        netip.AddrFrom4([4]byte(b[12:16])),
+		dst:        netip.AddrFrom4([4]byte(b[16:20])),
 	}, nil
 }
 
 // String formats the header for logs: "10.10.0.1 -> 10.10.0.2 ICMP ttl=64, 84 bytes".
 func (h ipv4Header) String() string {
-	return fmt.Sprintf("%s -> %s %s ttl=%d, %d bytes", h.src, h.dst, protocolName(h.protocol), h.ttl, h.totalLen)
+	s := fmt.Sprintf("%s -> %s %s ttl=%d, %d bytes", h.src, h.dst, protocolName(h.protocol), h.ttl, h.totalLen)
+	if h.fragmented {
+		s += " (fragment)"
+	}
+	return s
 }
 
 // protocolName names the transport protocol carried in the payload (the IPv4 PROTOCOL field).

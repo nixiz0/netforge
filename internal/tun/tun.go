@@ -7,8 +7,8 @@ import (
 // Name is netforge's TUN interface.
 const Name = "nf0"
 
-// Run opens the TUN interface and logs every IP packet the kernel routes into it.
-// Nothing is answered yet: the packets stop here.
+// Run opens the TUN interface, logs every IP packet the kernel routes into it, and answers pings
+// (ICMP echo requests) itself. Everything else stops here.
 //
 // Theory: _networking-lessons/6-tun-tap.md#virtual-network-interfaces
 func Run() error {
@@ -39,5 +39,16 @@ func Run() error {
 			continue
 		}
 		log.Printf("IPv4 %s", h)
+
+		// Write path: a packet written into the TUN interface is received by the kernel as if it
+		// had arrived on a network card, then delivered to the app (here: ping).
+		// Theory: _networking-lessons/6-tun-tap.md#vpn-receive-path
+		if reply := echoReply(buf[:n], h); reply != nil {
+			if _, err := dev.Write(reply); err != nil {
+				log.Println("write reply:", err)
+				continue
+			}
+			log.Printf("answered ping: wrote %d-byte echo reply %s -> %s", len(reply), h.dst, h.src)
+		}
 	}
 }
