@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/nixiz0/netforge/internal/dial"
+	"github.com/nixiz0/netforge/internal/dns"
 	"github.com/nixiz0/netforge/internal/echo"
 	"github.com/nixiz0/netforge/internal/proxy"
 	"github.com/nixiz0/netforge/internal/socks"
@@ -26,7 +27,7 @@ func main() {
 	case "echo":
 		err = echo.Run(defaultAddr)
 	case "dial":
-		err = dial.Run(addrArg())
+		err = dial.Run(addrArg(defaultAddr))
 	case "proxy":
 		err = proxy.Run()
 	case "socks":
@@ -34,7 +35,7 @@ func main() {
 	case "udpecho":
 		err = echo.RunUDP(defaultAddr)
 	case "udpdial":
-		err = dial.RunUDP(addrArg())
+		err = dial.RunUDP(addrArg(defaultAddr))
 	case "tunnel":
 		switch {
 		case len(os.Args) > 2 && os.Args[2] == "server":
@@ -44,6 +45,8 @@ func main() {
 		default:
 			usage()
 		}
+	case "dns":
+		err = dns.Run(addrArg(dns.Addr))
 	case "tun":
 		err = tun.Run()
 	case "vpn":
@@ -75,18 +78,19 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
+	fmt.Fprintln(os.Stderr, "  dns [addr]      DNS server on addr (default "+dns.Addr+"/udp), answers A for host.lab and vpn.lab")
 	fmt.Fprintln(os.Stderr, "  vpn server              (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", learns its client")
 	fmt.Fprintln(os.Stderr, "  vpn client <host:port>  (Linux, sudo) VPN client: TUN "+tun.Name+" <-> the server, with keepalives")
 	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
 }
 
-// addrArg returns the optional address argument (os.Args[2]), or defaultAddr when it is missing.
-func addrArg() string {
+// addrArg returns the optional address argument (os.Args[2]), or def when it is missing.
+func addrArg(def string) string {
 	if len(os.Args) > 2 {
 		return os.Args[2]
 	}
-	return defaultAddr
+	return def
 }
 
 // vpn opens the TUN interface and runs one end of the VPN: server mode when server is empty.

@@ -25,6 +25,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/tunnel/` | Point-to-point UDP tunnel: packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`), peer state and keepalive timing (`state.go`), IP packets between a TUN interface and the other end of the VPN (`vpn.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)`, `tunnel.RunTUN(dev, listen, peer)` |
 | `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `ipv4.go` decodes IPv4 headers, `icmp.go` computes Internet checksums and builds ping replies (both tested, build everywhere), `tun.go` logs each packet and writes ping replies back | `tun.Run()`, `tun.Open(name)` |
+| `internal/dns/` | Tiny authoritative DNS server over UDP: `message.go` parses a one-question query and builds the answer (A record with a compression pointer to the question, NODATA, NXDOMAIN; tested), `server.go` holds the lab zone (`host.lab`, `vpn.lab`) and the `ReadFrom`/`WriteTo` loop. Default `dns.Addr` = `127.0.0.1:5353/udp`; the lab runs it on `:53` in `nfpeer` | `dns.Run(addr)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `scripts/lab.sh` | Linux test lab, 3 namespaces: client (root, 192.168.100.1), VPN server `nfpeer` (192.168.100.2 / 203.0.113.1), host `nfnet` (203.0.113.10). Subcommands: `up`, `tun` (client nf0 10.10.0.1, server nf0 10.10.0.2), `route` (split tunnel + return route), `forward` (server IP forwarding), `nat` (drop the host's return route, MASQUERADE the VPN subnet on the server; needs `iptables`), `full` / `full-off` (client routes 0.0.0.0/1 + 128.0.0.0/1 into nf0; WSL has no internet meanwhile), `dns` (route to each `/etc/resolv.conf` nameserver: VPN if via nf0, else LEAK), `down`. LF line endings enforced by `.gitattributes` | `sudo bash scripts/lab.sh up` |
@@ -93,6 +94,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 ## Known limitations (deliberate, for now)
 
 - Routing beyond the tunnel is the kernel's job, configured outside netforge (`lab.sh route` / `forward`): netforge only moves packets between the TUN and UDP.
+- `netforge dns`: A records from a fixed map, no recursion (unknown names get NXDOMAIN, nothing is forwarded upstream), no EDNS (the OPT record from `dig` is ignored and not echoed), UDP only. Clients must be pointed at it (`dig @10.10.0.2`); nothing edits `/etc/resolv.conf`.
 - VPN server: one client at a time, and no authentication: any well-formed packet makes its sender the client (step 8 adds keys). Traffic is not encrypted.
 
 - Tunnel MTU assumes a 1500-byte path and an IPv4 outer header; no path MTU discovery, and oversized datagrams are dropped silently (no ICMP "fragmentation needed" back to the sender).
@@ -111,7 +113,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Every networking concept in the code links its lesson section on the line below the comment: `// Theory: _networking-lessons/<file>.md#<heading-anchor>` (GitHub anchor: heading in lowercase, spaces → `-`, punctuation dropped). New code adds the link; renamed headings update it.
 - Tests live next to the code (`x_test.go`, same package) and are table-driven: a slice of cases, one `t.Run` per case. Every binary format gets a test for its exact bytes, a round trip, and malformed input.
 - OS-specific code uses file-name build constraints (`x_linux.go`) plus a `//go:build !linux` fallback with the same function signatures, so the whole module still builds and vets on every OS. Check both: `go vet ./...` and `GOOS=linux go vet ./...`.
-- Binary protocols (SOCKS5, the tunnel): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
+- Binary protocols (SOCKS5, the tunnel, DNS): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.
 - Every change keeps three things in sync in the same commit: the code, the README (`Now`, roadmap checkboxes, CLI `Available`/`Planned`), and `docs/blueprint.html`.

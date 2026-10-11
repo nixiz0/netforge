@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) routes the client's traffic to a machine behind it (IP forwarding, split tunnel) and NATs it, so that machine only ever sees the server; a full-tunnel mode sends all of the client's traffic through the VPN, and `lab.sh dns` shows that DNS lookups still leak outside it. Next: a DNS server inside the VPN (step 7.6).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) routes the client's traffic to a machine behind it (IP forwarding, split tunnel) and NATs it, so that machine only ever sees the server; a full-tunnel mode sends all of the client's traffic through the VPN, `lab.sh dns` shows that DNS lookups still leak outside it, and `netforge dns` on the server answers lookups that travel inside the tunnel, at 10.10.0.2. Step 7 (VPN) done. Next: encryption (step 8).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -67,6 +67,9 @@ ping -c 3 203.0.113.10                                                          
 sudo bash scripts/lab.sh full                                                            # ALL traffic into the tunnel (WSL loses internet)
 sudo bash scripts/lab.sh dns                                                             # LEAK: WSL's resolver is not behind nf0
 sudo bash scripts/lab.sh full-off                                                        # back to normal
+sudo ip netns exec nfpeer /tmp/netforge dns :53                                          # terminal 3: DNS server on the VPN server
+dig @10.10.0.2 host.lab                                                                  # inner address: through the tunnel (apt install dnsutils)
+dig @192.168.100.2 host.lab                                                              # outer address: same server, beside the tunnel
 sudo bash scripts/lab.sh down                                                            # cleanup
 ```
 
@@ -135,7 +138,7 @@ Route IP through the tunnel (MTU, routes).
 - [x] 7.3 NAT on the server
 - [x] 7.4 Full tunnel without routing the tunnel into itself
 - [x] 7.5 See the DNS leak: the resolver's route bypasses the full tunnel
-- [ ] 7.6 A DNS server inside the VPN
+- [x] 7.6 A DNS server inside the VPN (`netforge dns`, reached at the server's inner address)
 
 ### 8 — Encryption
 AEAD, auth, key exchange.
@@ -158,6 +161,7 @@ netforge udpecho
 netforge udpdial [addr]
 netforge tunnel server
 netforge tunnel client
+netforge dns [addr]
 netforge tun        # Linux only, sudo
 netforge vpn server                 # Linux only, sudo
 netforge vpn client <host:port>     # Linux only, sudo
