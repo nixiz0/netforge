@@ -48,6 +48,35 @@ func TestPeerTable(t *testing.T) {
 	}
 }
 
+func TestAllowedSource(t *testing.T) {
+	packetFrom := func(src string) []byte {
+		ip := make([]byte, 20)
+		ip[0] = 0x45
+		copy(ip[12:16], netip.MustParseAddr(src).AsSlice())
+		return ip
+	}
+	client2 := &peerState{Peer: Peer{Addr: netip.MustParseAddr("10.10.0.3")}}
+	server := &peerState{} // a client's only peer: no VPN address of its own
+	cases := []struct {
+		name string
+		p    *peerState
+		src  string
+		want bool
+	}{
+		{"client 2, its own address", client2, "10.10.0.3", true},
+		{"client 2 claiming client 1", client2, "10.10.0.1", false},
+		{"client 2 claiming an outside host", client2, "203.0.113.10", false},
+		{"the server, a reply from the internet", server, "1.1.1.1", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.p.allows(packetFrom(c.src)); got != c.want {
+				t.Fatalf("allows(source %s) = %v, want %v", c.src, got, c.want)
+			}
+		})
+	}
+}
+
 func TestPeerTableRejectsDuplicateAddress(t *testing.T) {
 	srv, c1, c2 := newKey(t), newKey(t), newKey(t)
 	a := netip.MustParseAddr("10.10.0.1")

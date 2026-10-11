@@ -19,6 +19,7 @@
 #   lab.sh dns       client: show where DNS queries go (through nf0, or leaking outside the VPN)
 #   lab.sh up2       create the second client namespace and its cable to the server
 #   lab.sh tun2      give the second client's nf0 its address (after its netforge client started)
+#   lab.sh spoof     client 2 pings the server with client 1's address as source (allowed-IPs test)
 #   lab.sh down      remove everything (stop the netforge processes first)
 #
 # Theory: _networking-lessons/4-advanced-network-concepts.md#linux-network-namespaces
@@ -132,6 +133,13 @@ tun2)
 	ip netns exec nfc2 ip link set nf0 up mtu 1440
 	echo "TUN up: client 2 nf0 10.10.0.3 (MTU 1440)"
 	;;
+spoof)
+	# A valid peer with a forged inner source: client 2 claims 10.10.0.1, client 1's address.
+	# Theory: _networking-lessons/9-multi-peer-networking.md#allowed-networks
+	ip netns exec nfc2 ip addr replace 10.10.0.1/32 dev nf0
+	ip netns exec nfc2 ping -c 1 -W 2 -I 10.10.0.1 10.10.0.2 || true
+	ip netns exec nfc2 ip addr del 10.10.0.1/32 dev nf0
+	;;
 down)
 	ip netns del nfc2 2>/dev/null || true
 	ip netns del nfnet 2>/dev/null || true
@@ -140,7 +148,7 @@ down)
 	echo "lab down"
 	;;
 *)
-	echo "usage: $0 up|tun|route|forward|nat|full|full-off|dns|up2|tun2|down" >&2
+	echo "usage: $0 up|tun|route|forward|nat|full|full-off|dns|up2|tun2|spoof|down" >&2
 	exit 2
 	;;
 esac

@@ -144,6 +144,11 @@ func RunTUN(dev io.ReadWriter, listen, serverAddr string, priv *ecdh.PrivateKey,
 					conn.WriteTo(keys.seal(typeKeepalive, nil), from) // the server answers, so the client knows it is up
 				}
 			case typeData:
+				// Authentic is not enough: the peer must also own the source address it claims.
+				if !p.allows(pkt.payload) {
+					log.Printf("drop %d-byte IP packet %s from peer %s: source not allowed", len(pkt.payload), innerAddrs(pkt.payload), p.Addr)
+					continue
+				}
 				if _, err := dev.Write(pkt.payload); err != nil {
 					log.Println("TUN write:", err)
 					continue

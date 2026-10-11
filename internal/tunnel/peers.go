@@ -103,10 +103,27 @@ func (t *peerTable) identify(b []byte, from net.Addr) (*peerState, *sealer, pack
 	return nil, nil, packet{}, err
 }
 
+// allows reports whether this peer may send an inner packet with this source address. The same
+// table answers both questions: "who gets packets for 10.10.0.3?" (route) and "who may send
+// packets from 10.10.0.3?" (allows). Keys prove who the peer is; this decides what it may claim.
+// A peer without a VPN address is the server seen from a client: replies come from anywhere.
+//
+// Theory: _networking-lessons/9-multi-peer-networking.md#allowed-networks
+func (p *peerState) allows(ip []byte) bool {
+	if !p.Addr.IsValid() {
+		return true
+	}
+	src, ok := innerAddr(ip, 12)
+	return ok && src == p.Addr
+}
+
 // innerDst reads the destination address of an IPv4 packet.
-func innerDst(ip []byte) (netip.Addr, bool) {
+func innerDst(ip []byte) (netip.Addr, bool) { return innerAddr(ip, 16) }
+
+// innerAddr reads the IPv4 address at offset off in the header: 12 = source, 16 = destination.
+func innerAddr(ip []byte, off int) (netip.Addr, bool) {
 	if len(ip) < 20 || ip[0]>>4 != 4 {
 		return netip.Addr{}, false
 	}
-	return netip.AddrFrom4([4]byte(ip[16:20])), true
+	return netip.AddrFrom4([4]byte(ip[off : off+4])), true
 }

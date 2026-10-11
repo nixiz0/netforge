@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) routes the client's traffic to a machine behind it (IP forwarding, split tunnel) and NATs it, so that machine only ever sees the server; a full-tunnel mode sends all of the client's traffic through the VPN, `lab.sh dns` shows that DNS lookups still leak outside it, and `netforge dns` on the server answers lookups that travel inside the tunnel, at 10.10.0.2. Step 7 (VPN) done. Step 8 (Encryption) done: each end has an X25519 key pair (`netforge genkey` / `pubkey`), a 2-message handshake derives fresh session keys (forward secrecy), every packet is sealed with AES-256-GCM so the outer network only sees ciphertext, and a replay window drops any packet received twice. Multi-peer started: the server keeps a peer table (public key, VPN address, endpoint and session keys per peer) and sends each inner packet to the peer that owns its destination, so two clients talk to each other through it (hub and spoke). Next: allowed IPs (step 9.2).
+All 9 stages done. TCP echo server and client; HTTP/HTTPS forward proxy on `127.0.0.1:8080`; SOCKS5 proxy on `127.0.0.1:1080`; UDP echo server and a client that reports lost replies; a point-to-point UDP tunnel (`127.0.0.1:5300/udp` → `127.0.0.1:7000/udp`, 1468-byte MTU, keepalives); a TUN interface that decodes IPv4 and answers ping; and a VPN between Linux network namespaces (WSL2): routing, NAT and full tunnel, DNS inside the tunnel (`netforge dns`), an X25519 handshake that derives fresh AES-256-GCM session keys, replay protection, and a server with a peer table for several clients, each allowed to send only from its own VPN address.
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -80,6 +80,7 @@ sudo ip netns exec nfpeer /tmp/netforge vpn server /tmp/server.key /tmp/client.p
 sudo ip netns exec nfc2 /tmp/netforge vpn client 192.168.101.2:7000 /tmp/client2.key /tmp/server.pub                    # terminal 4: client 2
 sudo bash scripts/lab.sh tun && sudo bash scripts/lab.sh tun2 && sudo bash scripts/lab.sh forward                       # addresses again, server forwards
 ping -c 3 10.10.0.3                                                                      # client 1 -> server -> client 2
+sudo bash scripts/lab.sh spoof                                                           # client 2 claims 10.10.0.1: dropped
 sudo bash scripts/lab.sh down                                                            # cleanup
 ```
 
@@ -161,7 +162,7 @@ AEAD, replay protection, key exchange.
 Peers and routes.
 
 - [x] 9.1 Peer table: one server, two clients, packets routed by inner destination
-- [ ] 9.2 Allowed IPs: each peer may only send from its own VPN address
+- [x] 9.2 Allowed IPs: each peer may only send from its own VPN address
 
 ## CLI
 
