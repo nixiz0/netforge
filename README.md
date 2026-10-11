@@ -419,7 +419,7 @@ All 9 stages are done. Each sub-step is one commit.
 
 ## Going further
 
-Ideas to extend the project on your own:
+### Extend netforge
 
 - Run the VPN server on a real VPS and connect from home.
 - Carry IPv6 inside the tunnel.
@@ -427,4 +427,71 @@ Ideas to extend the project on your own:
 - Allow whole networks behind a peer (site-to-site), with longest-prefix match between peers.
 - Find peers with a receiver index instead of trying each key, as WireGuard does.
 
-> ⚠️ **Educational project.** netforge shows how a VPN works; it is not audited and not meant to protect real traffic. For real use, choose WireGuard.
+### Compare with real VPNs
+
+netforge rebuilds, in small, the ideas behind production VPNs. Their documentation is the best next read: you will recognize every piece.
+
+| | netforge | WireGuard | Tailscale | OpenVPN |
+|---|---|---|---|---|
+| What it is | a learning lab | a VPN protocol, built into Linux | a mesh VPN service built on WireGuard | a classic VPN built on TLS |
+| Transport | UDP | UDP | UDP, relayed when UDP is blocked | UDP or TCP |
+| Keys | X25519 key pairs + handshake | Curve25519 key pairs + Noise handshake | WireGuard keys, handed out by a coordination server | TLS certificates, or username/password |
+| Encryption | AES-256-GCM | ChaCha20-Poly1305 | WireGuard's | negotiated by TLS |
+| Topology | hub and spoke | peers you configure by hand | mesh: devices connect directly | client to server |
+| Runs in | userspace (Go) + TUN | the Linux kernel (userspace ports exist) | userspace (wireguard-go) + TUN | userspace + TUN or TAP |
+
+<details>
+<summary><b>WireGuard: the design netforge follows</b></summary>
+
+A modern, minimal VPN that lives inside the Linux kernel. Stages 5–9 of netforge are a simplified version of its design:
+- a UDP tunnel and a TUN interface;
+- key pairs and a handshake (Noise framework, Curve25519);
+- AEAD encryption (ChaCha20-Poly1305);
+- **cryptokey routing**: one table answers both "which peer gets packets for this address?" and "which peer may send from it?". That is your stage 9.2.
+
+| Read | Link |
+|---|---|
+| Conceptual overview, cryptokey routing, roaming | [wireguard.com/#conceptual-overview](https://www.wireguard.com/#conceptual-overview) |
+| Protocol and cryptography | [wireguard.com/protocol](https://www.wireguard.com/protocol/) |
+| The whitepaper | [wireguard.pdf](https://www.wireguard.com/papers/wireguard.pdf) |
+| Try it | [Quick start](https://www.wireguard.com/quickstart/) |
+
+</details>
+
+<details>
+<summary><b>Tailscale: WireGuard plus automation</b></summary>
+
+Tailscale is built on WireGuard and splits the work in two ([lesson: control plane vs data plane](_networking-lessons/9-multi-peer-networking.md#control-plane-vs-data-plane)):
+- **Data plane:** WireGuard (its userspace Go version, wireguard-go) encrypts every packet, directly from device to device.
+- **Control plane:** a [coordination server](_networking-lessons/9-multi-peer-networking.md#coordination-server) acts as a "shared drop box for public keys". Each device uploads its public key and gets its peers' keys and access rules. Private keys never leave the device, and the server carries almost no traffic.
+- **NAT traversal:** STUN and ICE-style techniques let devices reach each other directly through NATs. When UDP is blocked, [DERP relays](_networking-lessons/9-multi-peer-networking.md#relay-server) forward the already-encrypted packets without being able to read them.
+
+**WireGuard vs Tailscale:** WireGuard is the tunnel. You write each peer's key, address and endpoint by hand, exactly like `netforge vpn server <key> <peer.pub>=<ip>`. Tailscale configures all of that for you (keys, addresses, endpoints, NAT traversal, access rules) and adds login with an identity provider.
+
+| Read | Link |
+|---|---|
+| How Tailscale works | [tailscale.com/blog/how-tailscale-works](https://tailscale.com/blog/how-tailscale-works) |
+| How NAT traversal works | [tailscale.com/blog/how-nat-traversal-works](https://tailscale.com/blog/how-nat-traversal-works) |
+| DERP relay servers | [tailscale.com/kb/1232/derp-servers](https://tailscale.com/kb/1232/derp-servers) |
+| Tailscale compared with WireGuard | [tailscale.com/compare/wireguard](https://tailscale.com/compare/wireguard) |
+| Try it | [Install Tailscale](https://tailscale.com/kb/1017/install) |
+
+</details>
+
+<details>
+<summary><b>OpenVPN: another approach, built on TLS</b></summary>
+
+An older and very widespread VPN that makes different choices:
+- It secures the connection with **TLS**, with certificates, the same kind of trust as HTTPS ([lesson 3](_networking-lessons/3-http-tls-proxies.md)).
+- It runs over **UDP or TCP** on a single port. TCP gets through strict firewalls, but TCP inside TCP can stall when packets are lost ([lesson: TCP tunneling](_networking-lessons/5-tunneling.md#tcp-tunneling)).
+- It runs in userspace, with a **TUN** device (routed, layer 3, like netforge) or a **TAP** device (bridged, layer 2: whole Ethernet frames) ([lesson: TAP interface](_networking-lessons/6-tun-tap.md#tap-interface)).
+
+| Read | Link |
+|---|---|
+| Community edition | [openvpn.net/community](https://openvpn.net/community/) |
+| How-to guide: set up a server and clients | [openvpn.net/community-resources/how-to](https://openvpn.net/community-resources/how-to/) |
+| Source code | [github.com/OpenVPN/openvpn](https://github.com/OpenVPN/openvpn) |
+
+</details>
+
+> ⚠️ **Educational project.** netforge shows how a VPN works; it is not audited and not meant to protect real traffic. For real use, choose WireGuard, Tailscale or OpenVPN.
