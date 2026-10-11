@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/ecdh"
 	"fmt"
 	"log"
+	"net/netip"
 	"os"
+	"strings"
 
 	"github.com/nixiz0/netforge/internal/dial"
 	"github.com/nixiz0/netforge/internal/dns"
@@ -62,9 +65,15 @@ func main() {
 	case "vpn":
 		switch {
 		case len(os.Args) > 4 && os.Args[2] == "server":
-			err = vpn(":"+tunnel.VPNPort, "", os.Args[3], os.Args[4])
+			var peers []tunnel.Peer
+			if peers, err = parsePeers(os.Args[4:]); err == nil {
+				err = vpn(":"+tunnel.VPNPort, "", os.Args[3], peers)
+			}
 		case len(os.Args) > 5 && os.Args[2] == "client":
-			err = vpn(":0", os.Args[3], os.Args[4], os.Args[5])
+			var key *ecdh.PublicKey
+			if key, err = tunnel.ReadPublicKey(os.Args[5]); err == nil {
+				err = vpn(":0", os.Args[3], os.Args[4], []tunnel.Peer{{Key: key}})
+			}
 		default:
 			usage()
 		}
@@ -91,7 +100,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  dns [addr]      DNS server on addr (default "+dns.Addr+"/udp), answers A for host.lab and vpn.lab")
 	fmt.Fprintln(os.Stderr, "  genkey                 print a new X25519 private key (hex)")
 	fmt.Fprintln(os.Stderr, "  pubkey <keyfile>       print the public key of a private key file")
-	fmt.Fprintln(os.Stderr, "  vpn server <key> <peer.pub>              (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", answers handshakes")
+	fmt.Fprintln(os.Stderr, "  vpn server <key> <peer.pub>=<vpn ip>...  (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", one or more peers")
 	fmt.Fprintln(os.Stderr, "  vpn client <host:port> <key> <peer.pub>  (Linux, sudo) VPN client: TUN "+tun.Name+" <-> the server, handshake + keepalives")
 	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
@@ -107,12 +116,8 @@ func addrArg(def string) string {
 
 // vpn opens the TUN interface and runs one end of the VPN: server mode when server is empty.
 // main wires the two packages together, so tunnel never imports tun.
-func vpn(listen, server, keyFile, peerFile string) error {
+func vpn(listen, server, keyFile string, peers []tunnel.Peer) error {
 	priv, err := tunnel.ReadPrivateKey(keyFile)
-	if err != nil {
-		return err
-	}
-	peer, err := tunnel.ReadPublicKey(peerFile)
 	if err != nil {
 		return err
 	}
@@ -121,5 +126,27 @@ func vpn(listen, server, keyFile, peerFile string) error {
 		return err
 	}
 	defer dev.Close()
-	return tunnel.RunTUN(dev, listen, server, priv, peer)
+	return tunnel.RunTUN(dev, listen, server, priv, peers)
+}
+
+// parsePeers reads the server's peer list: each argument is "<public key file>=<VPN address>",
+// like /tmp/client.pub=10.10.0.1. Who the peer is, and where it lives inside the VPN.
+func parsePeers(args []string) ([]tunnel.Peer, error) {
+	var peers []tunnel.Peer
+	for _, a := range args {
+		file, addr, ok := strings.Cut(a, "=")
+		if !ok {
+			return nil, fmt.Errorf("%q: want <peer.pub>=<vpn address>", a)
+		}
+		key, err := tunnel.ReadPublicKey(file)
+		if err != nil {
+			return nil, err
+		}
+		ip, err := netip.ParseAddr(addr)
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, tunnel.Peer{Key: key, Addr: ip})
+	}
+	return peers, nil
 }

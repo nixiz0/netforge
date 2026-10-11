@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-func TestPeerLifecycle(t *testing.T) {
+func TestEndpointLifecycle(t *testing.T) {
 	home := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 61021}
 	roamed := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 61099}
-	var p peer
+	var p endpoint
 
 	if !p.seen(home) {
 		t.Fatal("first packet: want a new peer")

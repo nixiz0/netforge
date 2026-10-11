@@ -4,6 +4,7 @@
 #   root namespace   = VPN client   veth0 192.168.100.1                     TUN nf0 10.10.0.1
 #   namespace nfpeer = VPN server   veth1 192.168.100.2, veth2 203.0.113.1  TUN nf0 10.10.0.2
 #   namespace nfnet  = a host "on the internet", behind the server: veth3 203.0.113.10
+#   namespace nfc2   = a second VPN client (step 9): veth5 192.168.101.1 (server side: veth4 192.168.101.2), nf0 10.10.0.3
 #
 # Each namespace has its own interfaces, routes and settings, so both TUN interfaces can be nf0.
 #
@@ -16,6 +17,8 @@
 #   lab.sh full      client: send ALL IPv4 traffic into the tunnel (WSL loses internet until full-off)
 #   lab.sh full-off  client: back to normal routing
 #   lab.sh dns       client: show where DNS queries go (through nf0, or leaking outside the VPN)
+#   lab.sh up2       create the second client namespace and its cable to the server
+#   lab.sh tun2      give the second client's nf0 its address (after its netforge client started)
 #   lab.sh down      remove everything (stop the netforge processes first)
 #
 # Theory: _networking-lessons/4-advanced-network-concepts.md#linux-network-namespaces
@@ -44,12 +47,13 @@ up)
 	echo "lab up: client 192.168.100.1 <-> server 192.168.100.2 | server 203.0.113.1 <-> host 203.0.113.10"
 	;;
 tun)
+	# "replace", not "add": safe to run again after restarting one end (its nf0 comes back empty).
 	# MTU 1440 = 1500 - 60 bytes of overhead (IPv4 20 + UDP 8 + tunnel header 4 + nonce 12 + tag 16),
 	# so every encrypted outer packet still fits one 1500-byte frame.
 	# Theory: _networking-lessons/7-vpn-architecture.md#vpn-mtu
-	ip addr add 10.10.0.1/24 dev nf0
+	ip addr replace 10.10.0.1/24 dev nf0
 	ip link set nf0 up mtu 1440
-	ip netns exec nfpeer ip addr add 10.10.0.2/24 dev nf0
+	ip netns exec nfpeer ip addr replace 10.10.0.2/24 dev nf0
 	ip netns exec nfpeer ip link set nf0 up mtu 1440
 	echo "TUN up: client nf0 10.10.0.1 <-> server nf0 10.10.0.2 (MTU 1440)"
 	;;
@@ -111,14 +115,32 @@ dns)
 		esac
 	done
 	;;
+up2)
+	# A second VPN client with its own cable to the server: the server now has two peers.
+	# Theory: _networking-lessons/9-multi-peer-networking.md#hub-and-spoke
+	ip netns add nfc2
+	ip link add veth4 netns nfpeer type veth peer name veth5 netns nfc2
+	ip netns exec nfpeer ip addr add 192.168.101.2/24 dev veth4
+	ip netns exec nfpeer ip link set veth4 up
+	ip netns exec nfc2 ip addr add 192.168.101.1/24 dev veth5
+	ip netns exec nfc2 ip link set veth5 up
+	ip netns exec nfc2 ip link set lo up
+	echo "client 2: 192.168.101.1 <-> server 192.168.101.2"
+	;;
+tun2)
+	ip netns exec nfc2 ip addr replace 10.10.0.3/24 dev nf0
+	ip netns exec nfc2 ip link set nf0 up mtu 1440
+	echo "TUN up: client 2 nf0 10.10.0.3 (MTU 1440)"
+	;;
 down)
+	ip netns del nfc2 2>/dev/null || true
 	ip netns del nfnet 2>/dev/null || true
 	ip netns del nfpeer 2>/dev/null || true
 	ip link del veth0 2>/dev/null || true
 	echo "lab down"
 	;;
 *)
-	echo "usage: $0 up|tun|route|forward|nat|full|full-off|dns|down" >&2
+	echo "usage: $0 up|tun|route|forward|nat|full|full-off|dns|up2|tun2|down" >&2
 	exit 2
 	;;
 esac

@@ -33,8 +33,8 @@ func RunServer(target string) error {
 	defer inner.Close()
 	log.Printf("tunnel server: outer %s, inner %s -> %s", outer.LocalAddr(), inner.LocalAddr(), inner.RemoteAddr())
 
-	// Tunnel state: the client's outer address and when it was last heard (see peer in state.go).
-	var client peer
+	// Tunnel state: the client's outer address and when it was last heard (see endpoint in state.go).
+	var client endpoint
 
 	// Watchdog: a client silent for peerTimeout (no data, no keepalive) is forgotten.
 	go func() {

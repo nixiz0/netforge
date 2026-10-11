@@ -34,10 +34,10 @@ func RunClient(server string) error {
 	log.Printf("tunnel client: entrance %s, outer %s -> %s", local.LocalAddr(), outer.LocalAddr(), outer.RemoteAddr())
 
 	// Tunnel state on this side: the local app that should receive the replies,
-	// and whether the server is answering (see peer in state.go).
+	// and whether the server is answering (see endpoint in state.go).
 	var mu sync.Mutex
 	var app net.Addr
-	var remote peer
+	var remote endpoint
 
 	// Keepalives: one tiny packet now, then every keepaliveInterval, even when idle. They keep NAT
 	// and firewall state open along the path, and the server's answers prove the tunnel is up.

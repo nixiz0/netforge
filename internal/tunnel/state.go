@@ -16,44 +16,46 @@ const (
 	peerTimeout       = 3 * keepaliveInterval
 )
 
-// peer is the tunnel state about the other end: its address and when we last heard from it.
-// Several goroutines use it, so every method takes the mutex.
+// endpoint is the tunnel state about the other end's current real address (IP:port, its endpoint) and
+// when we last heard from it. Several goroutines use it, so every method takes the mutex.
+//
+// Theory: _networking-lessons/9-multi-peer-networking.md#peer-identity-vpn-address-endpoint
 //
 // Theory: _networking-lessons/5-tunneling.md#tunnel-state
-type peer struct {
+type endpoint struct {
 	mu       sync.Mutex
 	addr     net.Addr
 	lastSeen time.Time
 }
 
-// seen records a packet from addr. It returns true when this is a new peer: the first one, one that
+// seen records a packet from addr. It returns true when the address is new: the first one, one that
 // had expired, or the same peer arriving from a new address (roaming).
 //
 // Theory: _networking-lessons/7-vpn-architecture.md#endpoint-changes--roaming
-func (p *peer) seen(addr net.Addr) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	isNew := p.addr == nil || p.addr.String() != addr.String()
-	p.addr, p.lastSeen = addr, time.Now()
+func (e *endpoint) seen(addr net.Addr) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	isNew := e.addr == nil || e.addr.String() != addr.String()
+	e.addr, e.lastSeen = addr, time.Now()
 	return isNew
 }
 
-// get returns the peer's current address, or nil when there is none.
-func (p *peer) get() net.Addr {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.addr
+// get returns the current address, or nil when there is none.
+func (e *endpoint) get() net.Addr {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.addr
 }
 
-// expire forgets the peer if it has been silent for longer than timeout.
+// expire forgets the address if it has been silent for longer than timeout.
 // It returns the forgotten address and true when it just did.
-func (p *peer) expire(timeout time.Duration) (net.Addr, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.addr == nil || time.Since(p.lastSeen) < timeout {
+func (e *endpoint) expire(timeout time.Duration) (net.Addr, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.addr == nil || time.Since(e.lastSeen) < timeout {
 		return nil, false
 	}
-	gone := p.addr
-	p.addr = nil
+	gone := e.addr
+	e.addr = nil
 	return gone, true
 }

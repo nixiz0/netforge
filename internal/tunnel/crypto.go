@@ -27,6 +27,9 @@ const (
 	vpnMTU       = tunnelMTU - sealOverhead // 1440: the largest inner packet in VPN mode
 )
 
+// errAuth: the tag does not match. Wrong keys, or a modified packet.
+var errAuth = errors.New("authentication failed: wrong key or modified packet")
+
 // sealer encrypts and decrypts tunnel packets: one key to seal what we send, another to open what
 // we receive. Both come from a handshake (handshake.go).
 type sealer struct {
@@ -100,7 +103,7 @@ func (s *sealer) open(b []byte) (packet, error) {
 	nonce, sealed := pkt.payload[:nonceSize], pkt.payload[nonceSize:]
 	plaintext, err := s.recv.Open(nil, nonce, sealed, b[:headerSize])
 	if err != nil {
-		return packet{}, errors.New("authentication failed: wrong key or modified packet")
+		return packet{}, errAuth
 	}
 	// Authentic, but is it new? Checked after the tag, so only the real peer moves the window.
 	prefix, counter := [4]byte(nonce[:4]), binary.BigEndian.Uint64(nonce[4:])
