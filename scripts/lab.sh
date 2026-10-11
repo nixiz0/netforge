@@ -15,6 +15,7 @@
 #   lab.sh nat       host: forget the return route; server: NAT the VPN subnet behind 203.0.113.1
 #   lab.sh full      client: send ALL IPv4 traffic into the tunnel (WSL loses internet until full-off)
 #   lab.sh full-off  client: back to normal routing
+#   lab.sh dns       client: show where DNS queries go (through nf0, or leaking outside the VPN)
 #   lab.sh down      remove everything (stop the netforge processes first)
 #
 # Theory: _networking-lessons/4-advanced-network-concepts.md#linux-network-namespaces
@@ -95,6 +96,19 @@ full-off)
 	ip route del 128.0.0.0/1 dev nf0 2>/dev/null || true
 	echo "full tunnel off: $(ip route get 1.1.1.1 | head -1)"
 	;;
+dns)
+	# Where do this machine's DNS questions go? Ask the kernel the route to each resolver it uses.
+	# Not through nf0 = the lookups bypass the VPN, even in full-tunnel mode: a DNS leak.
+	# Theory: _networking-lessons/7-vpn-architecture.md#dns-through-a-vpn
+	# Theory: _networking-lessons/1-network-fundamentals.md#18-dns
+	for ns in $(awk '/^nameserver/ {print $2}' /etc/resolv.conf); do
+		r=$(ip route get "$ns" | head -1 | tr -s ' ')
+		case "$r" in
+		*" dev nf0 "*) echo "VPN   $ns -> $r" ;;
+		*) echo "LEAK  $ns -> $r" ;;
+		esac
+	done
+	;;
 down)
 	ip netns del nfnet 2>/dev/null || true
 	ip netns del nfpeer 2>/dev/null || true
@@ -102,7 +116,7 @@ down)
 	echo "lab down"
 	;;
 *)
-	echo "usage: $0 up|tun|route|forward|nat|full|full-off|down" >&2
+	echo "usage: $0 up|tun|route|forward|nat|full|full-off|dns|down" >&2
 	exit 2
 	;;
 esac
