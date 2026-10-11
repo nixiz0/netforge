@@ -184,7 +184,7 @@ code, .mono { font-family: var(--font-mono); }
 
   <main class="main">
     <div class="mapbox">
-      <svg id="map" viewBox="0 0 1000 610" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Network map"></svg>
+      <svg id="map" viewBox="0 0 1000 720" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Network map"></svg>
     </div>
     <aside class="side">
       <section class="card" id="now" aria-live="polite"></section>
@@ -209,7 +209,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "5.1", what: "tunnel packet format" };
+const SYNC = { step: "5.2", what: "tunnel server" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram" };
@@ -222,6 +222,7 @@ const NODES = {
   echo:   { x: 345, y: 290, label: "echo", sub: "internal/echo", port: ":9000", script: "internal/echo/echo.go" },
   socks:  { x: 110, y: 290, label: "socks", sub: "internal/socks", port: ":1080", script: "internal/socks/socks.go" },
   closed: { x: 345, y: 505, label: "closed port", sub: "no program", port: ":9001", info: "Nothing listens here. The kernel answers any SYN with RST.", th: "2-transport-networking.md#closing-tcp|Closing TCP (RST)" },
+  tserver: { x: 448, y: 610, label: "tunnel server", sub: "internal/tunnel", port: ":7000", script: "internal/tunnel/server.go" },
   router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies.", th: "1-network-fundamentals.md#12-nat|NAT" },
   dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start.", th: "1-network-fundamentals.md#18-dns|DNS" },
   site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's.", th: "3-http-tls-proxies.md#forward-proxy|Forward proxy" },
@@ -240,6 +241,7 @@ const FILES = {
   "internal/socks/socks.go": { role: "SOCKS5 proxy on 127.0.0.1:1080 (no auth, TCP CONNECT)", cmd: "go run ./cmd/netforge socks", fns: [["socks.Run()", "Listen on socks.Addr, Accept, go handle"], ["handle(client)", "Greet, read the request, log who resolved DNS, dial, reply, relay.Pipe"], ["greet(conn)", "io.ReadFull 2-byte header + N methods, answer 05 00"], ["readRequest(conn)", "VER CMD RSV ATYP, address by type, big-endian port"], ["reply(conn, rep, bind)", "05 REP 00 ATYP BND.ADDR BND.PORT"], ["resolvedBy(atyp)", "03 domain → proxy resolves · IP → client did"]] },
   "internal/resolve/resolve.go": { role: "Explicit DNS lookup, timed and logged, then dial (used by proxy and socks)", cmd: "library, no command", fns: [["resolve.Dial(target, timeout)", "LookupHost, then try each IP, IPv4 first"], ["(*Lookup).String()", "\"example.com → 203.0.113.10 in 12ms\""], ["ipv4First(ips)", "IPv4 before IPv6"]] },
   "internal/tunnel/packet.go": { role: "Tunnel packet format: VER TYPE LENGTH + payload (tested)", cmd: "go test ./internal/tunnel", fns: [["(packet).encode()", "01 TYPE LEN LEN + payload: encapsulation"], ["decode(b)", "check version and length, return the payload: decapsulation"]] },
+  "internal/tunnel/server.go": { role: "Tunnel server endpoint on 127.0.0.1:7000/udp", cmd: "go run ./cmd/netforge tunnel server", fns: [["tunnel.RunServer(target)", "outer UDP socket + inner socket to target, two loops"], ["outer → inner", "decode, remember the peer, forward the payload"], ["inner → outer", "wrap the reply, send it to the peer"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
@@ -409,12 +411,28 @@ const SCENARIOS = {
       { p: ["dial"], t: "lost", l: "+65508: too big", f: "internal/dial/udp.go", c: "conn.Write(msg) → error", k: "Max datagram", s: "One byte more cannot fit in an IP packet: Write fails at once, nothing is sent.",
         log: [["dial", "send: write udp 127.0.0.1:61002->127.0.0.1:9000: wsasend: A message sent on a datagram socket was larger than the internal message buffer or some other network limit…"]] }
     ]
+  },
+  tserver: {
+    name: "Tunnel server", blurb: "Step 5.2: a hand-made tunnel packet goes in, the header comes off, udpecho answers, the reply goes back wrapped.",
+    run: ["go run ./cmd/netforge udpecho", "go run ./cmd/netforge tunnel server", "$p = [byte[]]((1, 1, 0, 5) + [Text.Encoding]::ASCII.GetBytes(\"hello\")); $u = [Net.Sockets.UdpClient]::new(); $u.Connect(\"127.0.0.1\", 7000); [void]$u.Send($p, $p.Length)"],
+    boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"], ["tunnel", "tunnel server: outer 127.0.0.1:7000, inner 127.0.0.1:61011 -> 127.0.0.1:9000"]],
+    steps: [
+      { p: ["dial", "@200,610", "tserver"], t: "udp", l: "01 01 00 05 hello", f: "internal/tunnel/server.go", c: "client: PowerShell UdpClient (the tunnel client comes in 5.3)", k: "Encapsulation", s: "A hand-made tunnel packet: header 01 01 00 05, then the inner payload \"hello\".",
+        log: [["tunnel", "outer 9 bytes <- 127.0.0.1:61010, decapsulated 5 bytes -> 127.0.0.1:9000"]] },
+      { p: ["tserver", "@448,290", "echo"], t: "udp", l: "\"hello\"", f: "internal/tunnel/server.go", c: "decode(buf[:n]) · inner.Write(pkt.payload)", k: "Decapsulation", s: "Header stripped: udpecho receives a plain 5-byte datagram, sent by the tunnel server.",
+        log: [["echo", "5 bytes from 127.0.0.1:61011: \"hello\""]] },
+      { p: ["echo", "@448,290", "tserver"], t: "udp", l: "\"hello\"", f: "internal/tunnel/server.go", c: "inner.Read(buf)", k: "Inner vs outer", s: "udpecho answers the tunnel server. It never sees the real client: that address lives only on the outer side." },
+      { p: ["tserver", "@200,610", "dial"], t: "udp", l: "01 01 00 05 hello", f: "internal/tunnel/server.go", c: "packet{typ: typeData, payload: buf[:n]}.encode() · outer.WriteTo(pkt, peer)", k: "Tunnel state", s: "The reply is wrapped again and sent to the peer the server remembered from the first packet.",
+        log: [["tunnel", "inner 5 bytes <- 127.0.0.1:9000, encapsulated 9 bytes -> 127.0.0.1:61010"]] },
+      { p: ["dial", "@200,610", "tserver"], t: "lost", l: "\"hello\" (no header)", f: "internal/tunnel/server.go", c: "decode(buf[:n]) → error", k: "Decapsulation", s: "Not a tunnel packet: decode refuses it (its first byte 0x68 is not version 1) and nothing reaches udpecho.",
+        log: [["tunnel", "drop 5 bytes from 127.0.0.1:61010: unknown tunnel version 0x68"]] }
+    ]
   }
 };
 
 // Theory links: concept (step "k") → lesson section. Format "file.md#anchor|Section title".
 const LESSONS = "https://github.com/nixiz0/netforge/blob/prod/_networking-lessons/";
-const T2 = "2-transport-networking.md#", T3 = "3-http-tls-proxies.md#", T1 = "1-network-fundamentals.md#";
+const T2 = "2-transport-networking.md#", T3 = "3-http-tls-proxies.md#", T1 = "1-network-fundamentals.md#", T5 = "5-tunneling.md#";
 const THEORY = {
   "Handshake 1/3": T2 + "three-way-handshake|Three-way handshake", "Handshake 2/3": T2 + "three-way-handshake|Three-way handshake",
   "Handshake 3/3 · ESTABLISHED": T2 + "three-way-handshake|Three-way handshake", "ESTABLISHED": T2 + "three-way-handshake|Three-way handshake",
@@ -434,11 +452,11 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Encapsulation": T5 + "encapsulation|Encapsulation", "Decapsulation": T5 + "what-is-a-tunnel|What is a tunnel?", "Inner vs outer": T5 + "inner-vs-outer-packet|Inner vs outer packet", "Tunnel state": T5 + "tunnel-state|Tunnel state", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
 const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "next"], ["TUN"], ["VPN"], ["Encryption"], ["Multi-peer"]];
-const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2" };
+const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2", tunnel: "#9fe0b0" };
 
 /* =================== engine =================== */
 const $ = (s) => document.querySelector(s);
@@ -487,9 +505,9 @@ const NW = 180, NH = 60;
 function renderMap() {
   const on = scenNodes(), st = cur(), sc = SC();
   let s = `<text class="cap-t" x="20" y="30">${esc(sc.name)}</text><text class="cap-s" x="20" y="50">${esc(sc.blurb)}</text>
-    <rect class="zone" x="18" y="62" width="520" height="500" rx="18"/>
+    <rect class="zone" x="18" y="62" width="520" height="610" rx="18"/>
     <text class="zone-t" x="38" y="88">Your PC</text><text class="zone-s" x="38" y="106">192.168.1.20 · loopback 127.0.0.1</text>
-    <rect class="zone" x="728" y="62" width="258" height="500" rx="18"/>
+    <rect class="zone" x="728" y="62" width="258" height="610" rx="18"/>
     <text class="zone-t" x="748" y="88">Internet</text>`;
   LINKS.forEach(([a, b, loop]) => {
     const A = NODES[a], B = NODES[b], used = on.has(a) && on.has(b);
@@ -510,7 +528,7 @@ function renderMap() {
   });
   let lx = 20;
   Object.entries({ ...LAYERS, lost: "No answer" }).forEach(([k, n]) => {
-    s += `<rect x="${lx}" y="583" width="16" height="4" rx="2" style="fill:var(--t-${k})"/><text class="leg" x="${lx + 22}" y="589">${n}</text>`;
+    s += `<rect x="${lx}" y="693" width="16" height="4" rx="2" style="fill:var(--t-${k})"/><text class="leg" x="${lx + 22}" y="699">${n}</text>`;
     lx += 34 + n.length * 6.6;
   });
   s += `<g id="pkt" class="pkt"><rect rx="11" height="22" y="-11"/><text y="4"></text></g><circle id="pulse" class="pulse" r="0"/><g id="lostx"></g>`;

@@ -9,6 +9,7 @@ import (
 	"github.com/nixiz0/netforge/internal/echo"
 	"github.com/nixiz0/netforge/internal/proxy"
 	"github.com/nixiz0/netforge/internal/socks"
+	"github.com/nixiz0/netforge/internal/tunnel"
 )
 
 // Theory: _networking-lessons/1-network-fundamentals.md#5-loopback
@@ -33,6 +34,12 @@ func main() {
 		err = echo.RunUDP(defaultAddr)
 	case "udpdial":
 		err = dial.RunUDP(addrArg())
+	case "tunnel":
+		if len(os.Args) > 2 && os.Args[2] == "server" {
+			err = tunnel.RunServer(defaultAddr)
+		} else {
+			usage()
+		}
 	default:
 		usage()
 	}
@@ -51,6 +58,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  socks           SOCKS5 server on "+socks.Addr+" (no auth, CONNECT)")
 	fmt.Fprintln(os.Stderr, "  udpecho         UDP echo server on "+defaultAddr+" (same port number as echo, separate UDP port space)")
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
+	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	os.Exit(2)
 }
 

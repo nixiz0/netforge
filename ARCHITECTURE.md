@@ -23,7 +23,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/dial/` | Interactive clients: TCP (`dial.go`, stdin ⇄ conn) and UDP (`udp.go`, one line = one datagram) | `dial.Run(addr)`, `dial.RunUDP(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
-| `internal/tunnel/` | Tunnel (in progress): packet format `VER TYPE LENGTH PAYLOAD` with encode/decode and tests | (no command yet) |
+| `internal/tunnel/` | Tunnel (in progress): packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`) | `tunnel.RunServer(target)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
@@ -79,6 +79,12 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 3. Dial the target (5 s). Reply `05 REP 00 ATYP BND.ADDR BND.PORT` via `reply()`: `00` success with the proxy's local end of the upstream connection, `04` host unreachable, `01` bad request.
 4. `relay.Pipe(client, client, upstream)`: no bufio anywhere in SOCKS5, so the raw conn is safe to read.
 
+## Tunnel internals (`internal/tunnel`)
+
+- Outer side: one UDP socket on `ServerAddr`. Inner side: one connected UDP socket to the target. Two loops: outer → `decode` → inner, and inner → `encode` → outer.
+- Tunnel state: the peer's outer address, learned from the last valid packet and shared between the two goroutines under a `sync.Mutex`. One peer only (point-to-point).
+- Malformed packets are dropped and logged; nothing reaches the target.
+
 ## Known limitations (deliberate, for now)
 
 - Only the first request per client connection is parsed; later requests on a kept-alive connection go to the first target.
@@ -114,7 +120,7 @@ All content of `docs/blueprint.html` is driven by the data block at the top of i
 |---|---|
 | `SYNC` | Current roadmap step shown in the header |
 | `LAYERS` | Packet layer filters (`ctl`, `dns`, `data`, `tls`, `udp`; `lost` counts as `ctl`). A new layer also needs a `--t-<layer>` color token and an entry in the default `S.layers` |
-| `NODES` | Map nodes at fixed coordinates (viewBox 1000×610); `script` links a node to its Go file |
+| `NODES` | Map nodes at fixed coordinates (viewBox 1000×720; the bottom row of the PC zone holds the tunnel); `script` links a node to its Go file |
 | `LINKS` | Lines between nodes; third item `1` = loopback (dashed) |
 | `FILES` | Script card per Go file: role, run command, functions |
 | `SCENARIOS` | What the system can do. Per scenario: `run` (commands), `boot` (startup logs), `steps` = packets: `p` path of node ids (`"@x,y"` waypoints allowed in the middle to route around nodes), `t` layer, `l` label, `f` Go file, `c` Go code, `k` concept, `s` one-line explanation, `log` lines the programs print |
