@@ -23,7 +23,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/dial/` | Interactive clients: TCP (`dial.go`, stdin ⇄ conn) and UDP (`udp.go`, one line = one datagram) | `dial.Run(addr)`, `dial.RunUDP(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
-| `internal/tunnel/` | Tunnel (in progress): packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`) | `tunnel.RunServer(target)` |
+| `internal/tunnel/` | Tunnel (in progress): packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
@@ -81,8 +81,8 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 
 ## Tunnel internals (`internal/tunnel`)
 
-- Outer side: one UDP socket on `ServerAddr`. Inner side: one connected UDP socket to the target. Two loops: outer → `decode` → inner, and inner → `encode` → outer.
-- Tunnel state: the peer's outer address, learned from the last valid packet and shared between the two goroutines under a `sync.Mutex`. One peer only (point-to-point).
+- Server: outer UDP socket on `ServerAddr`, inner connected socket to the target. Client: the mirror image, inner UDP socket on `ClientAddr` (apps send here), outer connected socket to the server. Each endpoint runs two loops, one per direction: one side `encode`s, the other `decode`s.
+- Tunnel state: the server remembers the client's outer address, the client remembers the local app; each is learned from the last packet and shared between the two goroutines under a `sync.Mutex`. One peer and one app only (point-to-point).
 - Malformed packets are dropped and logged; nothing reaches the target.
 
 ## Known limitations (deliberate, for now)

@@ -35,9 +35,12 @@ func main() {
 	case "udpdial":
 		err = dial.RunUDP(addrArg())
 	case "tunnel":
-		if len(os.Args) > 2 && os.Args[2] == "server" {
+		switch {
+		case len(os.Args) > 2 && os.Args[2] == "server":
 			err = tunnel.RunServer(defaultAddr)
-		} else {
+		case len(os.Args) > 2 && os.Args[2] == "client":
+			err = tunnel.RunClient(tunnel.ServerAddr)
+		default:
 			usage()
 		}
 	default:
@@ -59,6 +62,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  udpecho         UDP echo server on "+defaultAddr+" (same port number as echo, separate UDP port space)")
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
+	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
 	os.Exit(2)
 }
 

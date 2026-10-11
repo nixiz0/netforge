@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Tunnel in progress: packet format (with tests) and the tunnel server on `127.0.0.1:7000/udp`. Next: the tunnel client (step 5.3).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. A working UDP tunnel: entrance `127.0.0.1:5300/udp` (client) → encapsulated over `127.0.0.1:7000/udp` → server → udpecho. Next: overhead and tunnel MTU (step 5.4).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -37,7 +37,9 @@ go run ./cmd/netforge udpdial                              # each line = one dat
 go run ./cmd/netforge udpdial 10.255.255.1:9000            # nobody answers: silent loss
 # in udpdial, type +1472, +65507, +65508 to probe datagram size limits
 
-go run ./cmd/netforge tunnel server                        # tunnel endpoint 127.0.0.1:7000/udp → udpecho
+go run ./cmd/netforge tunnel server                        # far end: 127.0.0.1:7000/udp → udpecho
+go run ./cmd/netforge tunnel client                        # near end: entrance 127.0.0.1:5300/udp
+go run ./cmd/netforge udpdial 127.0.0.1:5300               # talk to udpecho THROUGH the tunnel
 ```
 
 ## Roadmap
@@ -85,7 +87,7 @@ Client/server encapsulation.
 
 - [x] 5.1 Tunnel packet format: 4-byte header + payload, encode/decode, first tests
 - [x] 5.2 Tunnel server: decapsulate, forward to the inner target, wrap replies
-- [ ] 5.3 Tunnel client: local entrance, end to end udpdial → tunnel → udpecho
+- [x] 5.3 Tunnel client: local entrance, end to end udpdial → tunnel → udpecho
 - [ ] 5.4 Overhead and tunnel MTU
 - [ ] 5.5 Keepalives and tunnel state
 
@@ -115,6 +117,7 @@ netforge socks
 netforge udpecho
 netforge udpdial [addr]
 netforge tunnel server
+netforge tunnel client
 ```
 
 Planned:
