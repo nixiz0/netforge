@@ -84,6 +84,13 @@ sudo bash scripts/lab.sh spoof                                                  
 sudo bash scripts/lab.sh down                                                            # cleanup
 ```
 
+Test everything at once (Linux / WSL2, about 2 minutes, 46 checks on real traffic):
+
+```bash
+sudo apt install -y dnsutils tcpdump iptables      # once
+sudo bash scripts/e2e.sh
+```
+
 ## Roadmap
 
 ### 1 — TCP

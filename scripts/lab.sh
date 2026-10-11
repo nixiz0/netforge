@@ -71,7 +71,14 @@ forward)
 	# Off by default: a Linux box drops packets that are not addressed to itself.
 	# Theory: _networking-lessons/7-vpn-architecture.md#ip-forwarding
 	ip netns exec nfpeer sysctl -qw net.ipv4.ip_forward=1
-	echo "server: IP forwarding on"
+	# Hub and spoke (step 9): client 1 -> client 2 enters nf0 and leaves nf0 again, so the kernel
+	# would send client 1 an ICMP Redirect ("talk to 10.10.0.3 directly"). Through a VPN they
+	# can't, so redirects are off: "all" plus "default" (nf0 is recreated on every server restart).
+	# Theory: _networking-lessons/1-network-fundamentals.md#19-icmp-ping-traceroute-and-ip-ttl
+	# Theory: _networking-lessons/9-multi-peer-networking.md#hub-and-spoke
+	ip netns exec nfpeer sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.default.send_redirects=0
+	ip netns exec nfpeer sysctl -qw net.ipv4.conf.nf0.send_redirects=0 2>/dev/null || true
+	echo "server: IP forwarding on, ICMP redirects off"
 	;;
 nat)
 	command -v iptables >/dev/null || { echo "iptables is missing: sudo apt install -y iptables" >&2; exit 1; }

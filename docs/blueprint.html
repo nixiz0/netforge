@@ -126,8 +126,8 @@ code, .mono { font-family: var(--font-mono); }
 .sc h3 { margin: 0; font: 600 15px var(--font-mono); color: var(--gold-hi); }
 .sc p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
 .fns { display: grid; gap: 4px; }
-.fns div { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 10px; font-size: 12px; align-items: baseline; }
-.fns code { color: var(--fg); white-space: nowrap; }
+.fns div { display: grid; grid-template-columns: fit-content(55%) minmax(0, 1fr); gap: 10px; font-size: 12px; align-items: baseline; }
+.fns code { color: var(--fg); overflow-wrap: anywhere; }
 .fns span { color: var(--muted); }
 .fns div.hit code { color: var(--gold-hi); }
 .term { flex: 1; min-height: 110px; display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 14px; background: #06070a; overflow: hidden; }
@@ -261,7 +261,7 @@ const FILES = {
   "scripts/replay.py": { role: "Lab attack: record one VPN packet on veth0, send it again", cmd: "sudo python3 scripts/replay.py", fns: [["AF_PACKET socket", "sees every frame on veth0, like tcpdump"], ["sendto(payload, server)", "the exact same bytes, from another port"]] },
   "internal/tunnel/peers.go": { role: "Peer table: identity, VPN address, keys, endpoint per peer (tested)", cmd: "go test -run PeerTable ./internal/tunnel", fns: [["newPeerTable(priv, peers, isClient)", "one row per peer: handshake, session, endpoint"], ["identify(b, from)", "whose keys open it? the peer last seen at from first, then the others"], ["route(ip)", "inner destination → the peer that owns it"], ["allows(ip)", "inner source must be the peer's own VPN address"]] },
   "internal/tunnel/vpn.go": { role: "VPN: IP packets between a TUN interface and the other end", cmd: "sudo /tmp/netforge vpn client 192.168.100.2:7000 /tmp/client.key /tmp/server.pub", fns: [["tunnel.RunTUN(dev, listen, server, priv, peers)", "handshake, then TUN → seal → UDP · UDP → open → TUN"], ["client mode", "fixed server, keepalive every 5 s, tunnel up/down"], ["server mode", "learns the client from its packets, answers keepalives, forgets it after 15 s"], ["innerAddrs(ip)", "inner source and destination, for the logs only"]] },
-  "scripts/lab.sh": { role: "Linux lab: 3 namespaces, 2 veth cables, addresses and routes", cmd: "sudo bash scripts/lab.sh up|tun|route|forward|down", fns: [["up", "namespaces nfpeer (server) and nfnet (host) + veth cables"], ["tun", "client nf0 10.10.0.1, server nf0 10.10.0.2, MTU 1440"], ["route", "client: 203.0.113.0/24 dev nf0 · host: 10.10.0.0/24 via 203.0.113.1"], ["forward", "server: net.ipv4.ip_forward=1"], ["nat", "server: MASQUERADE 10.10.0.0/24 out of veth2 · host: no return route"], ["full / full-off", "client: 0.0.0.0/1 + 128.0.0.0/1 dev nf0, and back"], ["dns", "client: route to each resolver, VPN or LEAK"], ["up2 / tun2", "second client: namespace nfc2, cable to the server, nf0 10.10.0.3"], ["spoof", "client 2 pings with source 10.10.0.1 (client 1)"]] },
+  "scripts/lab.sh": { role: "Linux lab: 4 namespaces (client, server, host, client 2), 3 veth cables, addresses and routes", cmd: "sudo bash scripts/lab.sh up|tun|route|forward|nat|full|full-off|dns|up2|tun2|spoof|down", fns: [["up", "namespaces nfpeer (server) and nfnet (host) + veth cables"], ["tun", "client nf0 10.10.0.1, server nf0 10.10.0.2, MTU 1440"], ["route", "client: 203.0.113.0/24 dev nf0 · host: 10.10.0.0/24 via 203.0.113.1"], ["forward", "server: net.ipv4.ip_forward=1, ICMP redirects off"], ["nat", "server: MASQUERADE 10.10.0.0/24 out of veth2 · host: no return route"], ["full / full-off", "client: 0.0.0.0/1 + 128.0.0.0/1 dev nf0, and back"], ["dns", "client: route to each resolver, VPN or LEAK"], ["up2 / tun2", "second client: namespace nfc2, cable to the server, nf0 10.10.0.3"], ["spoof", "client 2 pings with source 10.10.0.1 (client 1)"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
@@ -422,12 +422,12 @@ const SCENARIOS = {
     run: ["go run ./cmd/netforge udpecho", "go run ./cmd/netforge udpdial   (then type +1472, +9000, +65507, +65508)"], boot: [["echo", "UDP echo server listening on 127.0.0.1:9000"]],
     steps: [
       { p: ["dial", "echo"], t: "udp", l: "+1472 → 1472 B", f: "internal/dial/udp.go", c: "sizeProbe(msg) · bytes.Repeat(\"x\", n)", k: "Fits one frame", s: "1472 = 1500 MTU − 20 IPv4 header − 8 UDP header: the largest datagram that crosses Ethernet in one piece.",
-        log: [["dial", "-> 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."], ["echo", "1472 bytes from 127.0.0.1:61002: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
-      { p: ["echo", "dial"], t: "udp", l: "1472 B", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Datagram boundaries", s: "Back in one piece, as one datagram.", log: [["dial", "<- 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+        log: [["dial", "-> 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""], ["echo", "1472 bytes from 127.0.0.1:61002: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
+      { p: ["echo", "dial"], t: "udp", l: "1472 B", f: "internal/echo/udp.go", c: "pc.WriteTo(buf[:n], from)", k: "Datagram boundaries", s: "Back in one piece, as one datagram.", log: [["dial", "<- 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
       { p: ["dial", "echo"], t: "udp", l: "+9000 → 9000 B", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "Fragmentation", s: "Fine on loopback. Over Ethernet, IP would split it into 7 fragments, and losing any one loses all 9000 bytes.",
-        log: [["dial", "-> 9000 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+        log: [["dial", "-> 9000 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
       { p: ["dial", "echo"], t: "udp", l: "+65507 → 65507 B", f: "internal/dial/udp.go", c: "conn.Write(msg)", k: "Max datagram", s: "65507 = 65535 (largest IPv4 packet) − 20 − 8. The biggest datagram that can exist.",
-        log: [["dial", "-> 65507 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+        log: [["dial", "-> 65507 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
       { p: ["dial"], t: "lost", l: "+65508: too big", f: "internal/dial/udp.go", c: "conn.Write(msg) → error", k: "Max datagram", s: "One byte more cannot fit in an IP packet: Write fails at once, nothing is sent.",
         log: [["dial", "send: write udp 127.0.0.1:61002->127.0.0.1:9000: wsasend: A message sent on a datagram socket was larger than the internal message buffer or some other network limit…"]] }
     ]
@@ -472,11 +472,11 @@ const SCENARIOS = {
     boot: [["tclient", "tunnel client: entrance 127.0.0.1:5300, outer 127.0.0.1:61021 -> 127.0.0.1:7000"]],
     steps: [
       { p: ["dial", "tclient"], t: "udp", l: "+1468 → 1468 B", f: "internal/tunnel/client.go", c: "n <= tunnelMTU", k: "Tunnel overhead", s: "1468 bytes enter the tunnel. They will gain a 4-byte tunnel header, 8 bytes of UDP and 20 of IPv4.",
-        log: [["dial", "-> 1468 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+        log: [["dial", "-> 1468 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
       { p: ["tclient", "tserver"], t: "udp", l: "1472 B (1500 on the wire)", f: "internal/tunnel/packet.go", c: "overhead = ipv4Header + udpHeader + headerSize  // 32", k: "Tunnel MTU", s: "1468 + 32 = exactly 1500: the outer packet fills one Ethernet frame, no fragmentation.",
         log: [["tclient", "local 1468 bytes <- 127.0.0.1:61020, encapsulated 1472 bytes (1500 on the wire) -> tunnel 127.0.0.1:7000"]] },
       { p: ["dial", "tclient"], t: "udp", l: "+1472 → 1472 B", f: "internal/tunnel/client.go", c: "local.ReadFrom(buf)", k: "Tunnel overhead", s: "1472 bytes fit a frame on their own (step 4.4), but not once wrapped: 1472 + 32 = 1504.",
-        log: [["dial", "-> 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"..."]] },
+        log: [["dial", "-> 1472 bytes: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""]] },
       { p: ["tclient"], t: "lost", l: "dropped: > 1468", f: "internal/tunnel/client.go", c: "if n > tunnelMTU { … continue }", k: "Tunnel MTU", s: "The client drops it instead of sending a 1504-byte packet that would fragment. Real VPNs lower the inner MTU to avoid this.",
         log: [["tclient", "drop 1472-byte datagram from 127.0.0.1:61020: above the tunnel MTU (1468), the outer packet would exceed 1500 bytes"]] }
     ]
@@ -535,7 +535,7 @@ const SCENARIOS = {
       { p: ["tun", "@500,90", "@200,90", "term"], t: "ip", l: "ICMP echo reply", f: "internal/tunnel/vpn.go", c: "decode · dev.Write(pkt.payload)", k: "Full tunnel flow", s: "Injected into the client's nf0 and delivered to ping: 0% loss.",
         log: [["root", "tunnel 116 bytes <- 192.168.100.2:7000, decrypted 84-byte IP packet 10.10.0.2 -> 10.10.0.1 -> TUN"]] },
       { p: ["peer"], t: "lost", l: "client silent 15 s", f: "internal/tunnel/vpn.go", c: "remote.expire(peerTimeout)", k: "Peer timeout", s: "Stop the client: after 15 s the server forgets it, and packets for it are dropped (\"no client connected\").",
-        log: [["peer", "client 192.168.100.1:41234 silent for 15s: forgotten"]] }
+        log: [["peer", "peer 10.10.0.1 at 192.168.100.1:41234 silent for 15s: forgotten"]] }
     ]
   },
   vpnrouter: {
@@ -664,7 +664,7 @@ const SCENARIOS = {
       { p: ["term", "@200,90", "@500,90", "tun"], t: "ip", l: "ICMP echo 10.10.0.1 → 10.10.0.3", f: "internal/tunnel/vpn.go", c: "ping 10.10.0.3", k: "Hub-and-spoke", s: "Client 1 pings client 2. Its route for 10.10.0.0/24 sends it into nf0, toward the server: the hub." },
       { p: ["tun", "peer"], t: "tls", l: "sealed for the server", f: "internal/tunnel/peers.go", c: "table.identify(buf[:n], from)", k: "Peer identity", s: "Whose keys open it? The server tries the peer last seen at that address first: client 1's session keys.",
         log: [["peer", "tunnel 116 bytes <- 192.168.100.1:41234, decrypted 84-byte IP packet 10.10.0.1 -> 10.10.0.3 -> TUN"]] },
-      { p: ["peer"], t: "ip", l: "kernel: in from nf0, out to nf0", f: "scripts/lab.sh", c: "net.ipv4.ip_forward=1", k: "IP forwarding", s: "10.10.0.3 is not the server, so its kernel forwards the packet, right back into nf0, where netforge reads it again." },
+      { p: ["peer"], t: "ip", l: "kernel: in from nf0, out to nf0", f: "scripts/lab.sh", c: "net.ipv4.ip_forward=1", k: "IP forwarding", s: "10.10.0.3 is not the server, so its kernel forwards the packet, right back into nf0, where netforge reads it again. Same interface in and out: the kernel would send an ICMP Redirect (\"talk to 10.10.0.3 directly\"), impossible in a VPN, so lab.sh forward turns redirects off." },
       { p: ["peer"], t: "ip", l: "peer table: 10.10.0.3 → client 2", f: "internal/tunnel/peers.go", c: "table.route(buf[:n])", k: "Peer routing", s: "Destination 10.10.0.3 belongs to client 2: use its session keys and its endpoint, 192.168.101.1." },
       { p: ["peer", "tun2"], t: "tls", l: "re-sealed for client 2", f: "internal/tunnel/vpn.go", c: "p.session.Load().seal(typeData, buf[:n])", k: "Per-peer security state", s: "Encrypted again, with client 2's keys. Each peer has its own keys, counters and replay window.",
         log: [["peer", "TUN 84-byte IP packet 10.10.0.1 -> 10.10.0.3, encrypted 116 bytes -> 192.168.101.1:39000"]] },
@@ -729,6 +729,8 @@ const S = {
   layers: { ctl: true, dns: true, data: true, tls: true, udp: true, ip: true }
 };
 const SC = () => SCENARIOS[S.scen];
+// wrapText splits a sentence into lines of at most n characters, on spaces (SVG text never wraps).
+const wrapText = (t, n) => t.split(" ").reduce((ls, w) => { const last = ls[ls.length - 1]; if (last && (last + " " + w).length <= n) ls[ls.length - 1] = last + " " + w; else ls.push(w); return ls; }, []);
 const cur = () => SC().steps[S.idx];
 const layerOf = (st) => (st.t === "lost" ? "ctl" : st.t);
 const visible = (st) => S.layers[layerOf(st)];
@@ -759,7 +761,7 @@ function renderHeader() {
 const NW = 180, NH = 60;
 function renderMap() {
   const on = scenNodes(), st = cur(), sc = SC();
-  let s = `<text class="cap-t" x="20" y="30">${esc(sc.name)}</text><text class="cap-s" x="20" y="50">${esc(sc.blurb)}</text>
+  let s = `<text class="cap-t" x="20" y="30">${esc(sc.name)}</text><text class="cap-s" x="20" y="50">${wrapText(sc.blurb, 78).map((l, i) => `<tspan x="20" dy="${i ? 16 : 0}">${esc(l)}</tspan>`).join("")}</text>
     <rect class="zone" x="18" y="62" width="520" height="610" rx="18"/>
     <text class="zone-t" x="38" y="88">Your PC</text><text class="zone-s" x="38" y="106">192.168.1.20 · loopback 127.0.0.1</text>
     <rect class="zone" x="728" y="62" width="258" height="610" rx="18"/>

