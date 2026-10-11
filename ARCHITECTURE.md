@@ -120,13 +120,13 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Binary protocols: over TCP (SOCKS5) read exact sizes with `io.ReadFull`, never a bare `Read`; over UDP (tunnel, DNS) one `ReadFrom` is one whole message, so check every length before slicing it. Protocol byte values are named constants.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.
-- Every change keeps four things in sync in the same commit: the code, the README (`Now`, roadmap checkboxes, CLI `Available`), this file, and `docs/blueprint.html`. A new behavior also gets a check in `scripts/e2e.sh`.
+- Every change keeps four things in sync in the same commit: the code, the README (stage table, the stage's lab, roadmap checkboxes, CLI reference), this file, and `docs/blueprint.html`. A new behavior also gets a check in `scripts/e2e.sh`.
 
 ## Adding a subcommand
 
 1. New package `internal/<name>/<name>.go` (`package <name>`) exporting `Run(...)`.
 2. In `cmd/netforge/main.go`: import it, add `case "<name>":` calling `<name>.Run(...)`, add one `usage()` line.
-3. README: add it under `Available`, tick the roadmap step.
+3. README: add a row to the CLI reference, show it in the stage's lab, tick the roadmap step.
 4. `scripts/e2e.sh`: add a check that runs it.
 5. Blueprint: update the data block (below).
 
