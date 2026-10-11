@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming), the client sends keepalives. Next: the server as a router (step 7.2).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and decodes the IPv4 header of every packet routed into it, and `netforge vpn server` / `vpn client` carry real IP packets between two network namespaces: the server learns its client (NAT, roaming) and routes the client's traffic to a third machine behind it (IP forwarding, split tunnel). Next: NAT on the server (step 7.3).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -60,6 +60,8 @@ sudo ip netns exec nfpeer /tmp/netforge vpn server                              
 sudo /tmp/netforge vpn client 192.168.100.2:7000                                         # terminal 2: client, keepalives
 sudo bash scripts/lab.sh tun                                                             # client nf0 10.10.0.1, server nf0 10.10.0.2
 ping -c 3 10.10.0.2                                                                      # answered by the server's kernel
+sudo bash scripts/lab.sh route && sudo bash scripts/lab.sh forward                       # server becomes a router
+ping -c 3 203.0.113.10                                                                   # a host BEHIND the server
 sudo bash scripts/lab.sh down                                                            # cleanup
 ```
 
@@ -124,7 +126,7 @@ Raw IP, routing, virtual NIC.
 Route IP through the tunnel (MTU, routes).
 
 - [x] 7.1 `vpn server` / `vpn client`: the server learns its client, keepalives, roaming
-- [ ] 7.2 The server as a router: IP forwarding, a machine behind the server, return route
+- [x] 7.2 The server as a router: IP forwarding, a machine behind the server, return route
 - [ ] 7.3 NAT on the server
 - [ ] 7.4 Full tunnel without routing the tunnel into itself
 - [ ] 7.5 DNS through the VPN

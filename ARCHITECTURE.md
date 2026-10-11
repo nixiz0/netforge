@@ -27,7 +27,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `ipv4.go` decodes IPv4 headers, `icmp.go` computes Internet checksums and builds ping replies (both tested, build everywhere), `tun.go` logs each packet and writes ping replies back | `tun.Run()`, `tun.Open(name)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
-| `scripts/lab.sh` | Linux test lab: namespace `nfpeer` + veth cable (`up`), TUN addresses (`tun`: client nf0 10.10.0.1, server nf0 10.10.0.2), cleanup (`down`). LF line endings enforced by `.gitattributes` | `sudo bash scripts/lab.sh up` |
+| `scripts/lab.sh` | Linux test lab, 3 namespaces: client (root, 192.168.100.1), VPN server `nfpeer` (192.168.100.2 / 203.0.113.1), host `nfnet` (203.0.113.10). Subcommands: `up`, `tun` (client nf0 10.10.0.1, server nf0 10.10.0.2), `route` (split tunnel + return route), `forward` (server IP forwarding), `down`. LF line endings enforced by `.gitattributes` | `sudo bash scripts/lab.sh up` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 | `_networking-lessons/` | Networking theory, one Markdown file per topic. The `_` prefix sorts it first and makes the Go tool ignore it | read on GitHub |
 
@@ -92,6 +92,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 
 ## Known limitations (deliberate, for now)
 
+- Routing beyond the tunnel is the kernel's job, configured outside netforge (`lab.sh route` / `forward`): netforge only moves packets between the TUN and UDP.
 - VPN server: one client at a time, and no authentication: any well-formed packet makes its sender the client (step 8 adds keys). Traffic is not encrypted.
 
 - Tunnel MTU assumes a 1500-byte path and an IPv4 outer header; no path MTU discovery, and oversized datagrams are dropped silently (no ICMP "fragmentation needed" back to the sender).
