@@ -7,10 +7,10 @@ Roadmap and usage live in [README.md](README.md); visual map in [docs/blueprint.
 | | |
 |---|---|
 | Language | Go 1.27.1, module `github.com/nixiz0/netforge` |
-| Dependencies | Standard library only (`net`, `io`, `bufio`, `net/url`, `log`). Keep it that way unless a stage truly needs more (e.g. TUN, crypto). |
+| Dependencies | Standard library, plus `golang.org/x/sys` (official Go extension) for the Linux TUN `ioctl`. Add a dependency only when a stage truly needs it (next candidate: crypto). |
 | Build / run | `go run ./cmd/netforge <command>` or `go build ./cmd/netforge` (binary ignored by git). Single binary, no config files, no flags yet (positional args only) |
 | Checks | `gofmt -l .` and `go vet ./...` must be clean; `go test ./...` must pass. Tests exist for pure logic (binary formats); network behavior is still checked by hand. |
-| Dev platform | Windows 11 + PowerShell. Use `curl.exe` (not the `curl` alias) and `netstat -ano \| findstr <port>`. TUN/VPN stages will need Linux (VPS) for the server side. |
+| Dev platform | Windows 11 + PowerShell. Use `curl.exe` (not the `curl` alias) and `netstat -ano \| findstr <port>`. TUN (step 6+) is Linux only: develop it in WSL2 Ubuntu (`/mnt/c/...` path, build with `CGO_ENABLED=0 go build -o /tmp/netforge ./cmd/netforge` (pure Go: no C toolchain or libc headers needed, static binary), run with `sudo`). If the build fails with "error obtaining VCS status: exit status 128", git in WSL refuses the Windows-owned repo: run `git config --global --add safe.directory <repo path>` once, or build with `-buildvcs=false`. The VPN server will run on a Linux VPS. |
 
 ## Layout
 
@@ -24,6 +24,7 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
 | `internal/tunnel/` | Point-to-point UDP tunnel: packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`), peer state and keepalive timing (`state.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)` |
+| `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `tun.go` logs packets | `tun.Run()`, `tun.Open(name)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
@@ -104,6 +105,7 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Comments describe the **network event** a line causes (SYN, FIN, EOF, framing), not the Go syntax.
 - Every networking concept in the code links its lesson section on the line below the comment: `// Theory: _networking-lessons/<file>.md#<heading-anchor>` (GitHub anchor: heading in lowercase, spaces → `-`, punctuation dropped). New code adds the link; renamed headings update it.
 - Tests live next to the code (`x_test.go`, same package) and are table-driven: a slice of cases, one `t.Run` per case. Every binary format gets a test for its exact bytes, a round trip, and malformed input.
+- OS-specific code uses file-name build constraints (`x_linux.go`) plus a `//go:build !linux` fallback with the same function signatures, so the whole module still builds and vets on every OS. Check both: `go vet ./...` and `GOOS=linux go vet ./...`.
 - Binary protocols (SOCKS5, the tunnel): read exact sizes with `io.ReadFull`, never a bare `Read`; protocol byte values are named constants.
 - Errors: check immediately, log with a short prefix (`"dial:"`, `"read request:"`), return.
 - Small steps: one concept per commit. Commit title imperative and short; body says why.

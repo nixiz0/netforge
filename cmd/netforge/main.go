@@ -9,6 +9,7 @@ import (
 	"github.com/nixiz0/netforge/internal/echo"
 	"github.com/nixiz0/netforge/internal/proxy"
 	"github.com/nixiz0/netforge/internal/socks"
+	"github.com/nixiz0/netforge/internal/tun"
 	"github.com/nixiz0/netforge/internal/tunnel"
 )
 
@@ -43,6 +44,8 @@ func main() {
 		default:
 			usage()
 		}
+	case "tun":
+		err = tun.Run()
 	default:
 		usage()
 	}
@@ -63,6 +66,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
+	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
 }
 

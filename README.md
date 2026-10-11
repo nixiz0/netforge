@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. Next: a TUN virtual interface (step 6).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. Step 5 (Tunnel) done: a point-to-point UDP tunnel, entrance `127.0.0.1:5300/udp` → encapsulated over `127.0.0.1:7000/udp` → udpecho, with a 1468-byte tunnel MTU, keepalives every 5 s and peer timeouts. TUN started (Linux, via WSL2): `netforge tun` creates the virtual interface `nf0` and logs every IP packet routed into it. Next: decode the IPv4 header (step 6.2).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -40,6 +40,15 @@ go run ./cmd/netforge udpdial 10.255.255.1:9000            # nobody answers: sil
 go run ./cmd/netforge tunnel server                        # far end: 127.0.0.1:7000/udp → udpecho
 go run ./cmd/netforge tunnel client                        # near end: entrance 127.0.0.1:5300/udp
 go run ./cmd/netforge udpdial 127.0.0.1:5300               # talk to udpecho THROUGH the tunnel
+```
+
+TUN (Linux only, inside WSL2):
+
+```bash
+git config --global --add safe.directory "$(pwd)"   # once: lets go build read git info on /mnt/c
+CGO_ENABLED=0 go build -o /tmp/netforge ./cmd/netforge && sudo /tmp/netforge tun   # terminal 1 (pure Go, static binary)
+sudo ip addr add 10.10.0.1/24 dev nf0 && sudo ip link set nf0 up mtu 1468   # terminal 2
+ping -c 3 10.10.0.2                                                     # packets show up in terminal 1
 ```
 
 ## Roadmap
@@ -94,6 +103,11 @@ Client/server encapsulation.
 ### 6 — TUN
 Raw IP, routing, virtual NIC.
 
+- [x] 6.1 Open a TUN interface (`nf0`) and log the raw IP packets routed into it
+- [ ] 6.2 Decode the IPv4 header (tested parser)
+- [ ] 6.3 Write path: answer ping from userspace (ICMP echo reply + checksum)
+- [ ] 6.4 TUN ⇄ tunnel: IP packets through the tunnel between two network namespaces
+
 ### 7 — VPN
 Route IP through the tunnel (MTU, routes).
 
@@ -118,6 +132,7 @@ netforge udpecho
 netforge udpdial [addr]
 netforge tunnel server
 netforge tunnel client
+netforge tun        # Linux only, sudo
 ```
 
 Planned:
