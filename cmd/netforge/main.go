@@ -41,13 +41,20 @@ func main() {
 			err = tunnel.RunServer(defaultAddr)
 		case len(os.Args) > 2 && os.Args[2] == "client":
 			err = tunnel.RunClient(tunnel.ServerAddr)
-		case len(os.Args) > 5 && os.Args[2] == "tun":
-			err = tunnelTUN(os.Args[3], os.Args[4], os.Args[5])
 		default:
 			usage()
 		}
 	case "tun":
 		err = tun.Run()
+	case "vpn":
+		switch {
+		case len(os.Args) > 2 && os.Args[2] == "server":
+			err = vpn(":"+tunnel.VPNPort, "")
+		case len(os.Args) > 3 && os.Args[2] == "client":
+			err = vpn(":0", os.Args[3])
+		default:
+			usage()
+		}
 	default:
 		usage()
 	}
@@ -68,7 +75,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
-	fmt.Fprintln(os.Stderr, "  tunnel tun <iface> <listen> <peer>   (Linux, sudo) carry the IP packets of TUN <iface> to <peer> over UDP")
+	fmt.Fprintln(os.Stderr, "  vpn server              (Linux, sudo) VPN server: TUN "+tun.Name+" <-> UDP :"+tunnel.VPNPort+", learns its client")
+	fmt.Fprintln(os.Stderr, "  vpn client <host:port>  (Linux, sudo) VPN client: TUN "+tun.Name+" <-> the server, with keepalives")
 	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
 }
@@ -81,13 +89,13 @@ func addrArg() string {
 	return defaultAddr
 }
 
-// tunnelTUN opens the TUN interface iface and carries its IP packets to peer through the tunnel.
+// vpn opens the TUN interface and runs one end of the VPN: server mode when server is empty.
 // main wires the two packages together, so tunnel never imports tun.
-func tunnelTUN(iface, listen, peer string) error {
-	dev, err := tun.Open(iface)
+func vpn(listen, server string) error {
+	dev, err := tun.Open(tun.Name)
 	if err != nil {
 		return err
 	}
 	defer dev.Close()
-	return tunnel.RunTUN(dev, listen, peer)
+	return tunnel.RunTUN(dev, listen, server)
 }

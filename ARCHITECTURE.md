@@ -23,11 +23,11 @@ Standard Go layout: `cmd/` holds the binary, `internal/` holds one package per f
 | `internal/dial/` | Interactive clients: TCP (`dial.go`, stdin ⇄ conn) and UDP (`udp.go`, one line = one datagram) | `dial.Run(addr)`, `dial.RunUDP(addr)` |
 | `internal/proxy/` | HTTP forward proxy on `proxy.Addr` (`127.0.0.1:8080`): plain HTTP + `CONNECT` | `proxy.Run()` |
 | `internal/socks/` | SOCKS5 proxy on `socks.Addr` (`127.0.0.1:1080`): no auth, TCP `CONNECT` | `socks.Run()` |
-| `internal/tunnel/` | Point-to-point UDP tunnel: packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`), peer state and keepalive timing (`state.go`), IP packets between a TUN interface and a fixed peer (`vpn.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)`, `tunnel.RunTUN(dev, listen, peer)` |
+| `internal/tunnel/` | Point-to-point UDP tunnel: packet format `VER TYPE LENGTH PAYLOAD` with tests (`packet.go`), server endpoint on `tunnel.ServerAddr` (`127.0.0.1:7000/udp`, `server.go`), client entrance on `tunnel.ClientAddr` (`127.0.0.1:5300/udp`, `client.go`), peer state and keepalive timing (`state.go`), IP packets between a TUN interface and the other end of the VPN (`vpn.go`) | `tunnel.RunServer(target)`, `tunnel.RunClient(server)`, `tunnel.RunTUN(dev, listen, peer)` |
 | `internal/tun/` | TUN interface `nf0` (Linux): `tun_linux.go` creates it via `/dev/net/tun` + `TUNSETIFF`, `tun_other.go` returns an error elsewhere, `ipv4.go` decodes IPv4 headers, `icmp.go` computes Internet checksums and builds ping replies (both tested, build everywhere), `tun.go` logs each packet and writes ping replies back | `tun.Run()`, `tun.Open(name)` |
 | `internal/relay/` | Shared two-way copy between a client and an upstream connection, with half-close | `relay.Pipe(client, fromClient, upstream)` |
 | `internal/resolve/` | Explicit DNS lookup (timed, loggable via `Lookup.String()`), then dial each address IPv4 first | `resolve.Dial(target, timeout)` |
-| `scripts/lab.sh` | Linux test lab: namespace `nfpeer` + veth cable (`up`), TUN addresses (`tun`), cleanup (`down`). LF line endings enforced by `.gitattributes` | `sudo bash scripts/lab.sh up` |
+| `scripts/lab.sh` | Linux test lab: namespace `nfpeer` + veth cable (`up`), TUN addresses (`tun`: client nf0 10.10.0.1, server nf0 10.10.0.2), cleanup (`down`). LF line endings enforced by `.gitattributes` | `sudo bash scripts/lab.sh up` |
 | `docs/blueprint.html` | One-screen live network map: scenarios, animated packets, Go line + concept per packet | open in a browser |
 | `_networking-lessons/` | Networking theory, one Markdown file per topic. The `_` prefix sorts it first and makes the Go tool ignore it | read on GitHub |
 
@@ -87,10 +87,12 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Tunnel state (`state.go`): a `peer` type (address + last seen, behind a mutex) with `seen` (returns true for a new or roamed peer), `get` and `expire`. The server tracks the client; the client tracks whether the server answers, and separately remembers the local app. One peer and one app only (point-to-point).
 - Keepalives: the client sends a header-only packet (type `02`) at start and every 5 s; the server answers each one. A side silent for 15 s (3 intervals) is expired: the client logs "tunnel down", the server forgets the peer. Any packet brings it back ("tunnel up" / "peer joined").
 - Malformed packets are dropped and logged; nothing reaches the target.
-- TUN mode (`vpn.go`): symmetric, both ends run `RunTUN(dev, listen, peer)` with fixed endpoints. TUN → `encode` → UDP to the peer; UDP → `decode` → write into the TUN. `dev` is an `io.ReadWriter`: `cmd/netforge` opens it with `tun.Open` and passes it in, so `tunnel` never imports `tun`. No keepalives in this mode yet.
+- VPN mode (`vpn.go`, `RunTUN(dev, listen, server)`): TUN → `encode` → UDP; UDP → `decode` → write into the TUN. Client mode (server set) sends to the fixed server plus keepalives; server mode (server empty) learns the client's address from its packets with the `peer` state, answers keepalives and forgets a silent client, so clients can be behind NAT and roam. `dev` is an `io.ReadWriter`: `cmd/netforge` opens it with `tun.Open` (`vpn` helper), so `tunnel` never imports `tun`.
 - Tunnel MTU: `tunnelMTU = linkMTU (1500) − overhead (20 IPv4 + 8 UDP + 4 tunnel header) = 1468`. Both ends drop inner datagrams above it instead of letting the outer packet fragment; logs show the on-the-wire size. A test pins the arithmetic.
 
 ## Known limitations (deliberate, for now)
+
+- VPN server: one client at a time, and no authentication: any well-formed packet makes its sender the client (step 8 adds keys). Traffic is not encrypted.
 
 - Tunnel MTU assumes a 1500-byte path and an IPv4 outer header; no path MTU discovery, and oversized datagrams are dropped silently (no ICMP "fragmentation needed" back to the sender).
 
