@@ -57,12 +57,17 @@ func RunServer(target string) error {
 			if p == nil {
 				continue // nobody to send it to yet
 			}
+			// Same rule on the way back: a reply above the tunnel MTU would not fit one frame once wrapped.
+			if n > tunnelMTU {
+				log.Printf("drop %d-byte reply from %s: above the tunnel MTU (%d)", n, target, tunnelMTU)
+				continue
+			}
 			pkt := packet{typ: typeData, payload: buf[:n]}.encode()
 			if _, err := outer.WriteTo(pkt, p); err != nil {
 				log.Println("outer write:", err)
 				continue
 			}
-			log.Printf("inner %d bytes <- %s, encapsulated %d bytes -> %s", n, target, len(pkt), p)
+			log.Printf("inner %d bytes <- %s, encapsulated %d bytes (%d on the wire) -> %s", n, target, len(pkt), len(pkt)+udpHeader+ipv4Header, p)
 		}
 	}()
 

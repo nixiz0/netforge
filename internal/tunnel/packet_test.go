@@ -31,6 +31,14 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// A full-size inner datagram, once wrapped, must take exactly one Ethernet frame on the wire.
+func TestTunnelMTU(t *testing.T) {
+	pkt := packet{typ: typeData, payload: make([]byte, tunnelMTU)}.encode()
+	if wire := len(pkt) + udpHeader + ipv4Header; wire != linkMTU {
+		t.Fatalf("a %d-byte inner datagram takes %d bytes on the wire, want exactly %d", tunnelMTU, wire, linkMTU)
+	}
+}
+
 // decode must refuse anything malformed instead of passing garbage on.
 func TestDecodeRejects(t *testing.T) {
 	cases := []struct {

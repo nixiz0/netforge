@@ -82,11 +82,16 @@ func RunClient(server string) error {
 		app = from
 		mu.Unlock()
 
+		// Too big to fit one frame once wrapped: drop it here rather than let the outer packet fragment.
+		if n > tunnelMTU {
+			log.Printf("drop %d-byte datagram from %s: above the tunnel MTU (%d), the outer packet would exceed %d bytes", n, from, tunnelMTU, linkMTU)
+			continue
+		}
 		pkt := packet{typ: typeData, payload: buf[:n]}.encode()
 		if _, err := outer.Write(pkt); err != nil {
 			log.Println("outer write:", err)
 			continue
 		}
-		log.Printf("local %d bytes <- %s, encapsulated %d bytes -> tunnel %s", n, from, len(pkt), outer.RemoteAddr())
+		log.Printf("local %d bytes <- %s, encapsulated %d bytes (%d on the wire) -> tunnel %s", n, from, len(pkt), len(pkt)+udpHeader+ipv4Header, outer.RemoteAddr())
 	}
 }

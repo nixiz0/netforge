@@ -22,7 +22,7 @@ Each roadmap stage has its lesson. In the code, `// Theory:` comments point to t
 
 ## Now
 
-HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. A working UDP tunnel: entrance `127.0.0.1:5300/udp` (client) → encapsulated over `127.0.0.1:7000/udp` → server → udpecho. Next: overhead and tunnel MTU (step 5.4).
+HTTP/HTTPS forward proxy on `127.0.0.1:8080`, SOCKS5 proxy on `127.0.0.1:1080`. Step 4 (UDP) done: echo server on `127.0.0.1:9000/udp`, and a UDP client (one line = one datagram, `+N` = an N-byte probe) that reports lost replies. A working UDP tunnel: entrance `127.0.0.1:5300/udp` (client) → encapsulated over `127.0.0.1:7000/udp` → server → udpecho, with a tunnel MTU of 1468 bytes (1500 − 32 bytes of overhead). Next: keepalives and tunnel state (step 5.5).
 
 ```bash
 go run ./cmd/netforge proxy                                # HTTP proxy
@@ -88,7 +88,7 @@ Client/server encapsulation.
 - [x] 5.1 Tunnel packet format: 4-byte header + payload, encode/decode, first tests
 - [x] 5.2 Tunnel server: decapsulate, forward to the inner target, wrap replies
 - [x] 5.3 Tunnel client: local entrance, end to end udpdial → tunnel → udpecho
-- [ ] 5.4 Overhead and tunnel MTU
+- [x] 5.4 Overhead and tunnel MTU (1468 = 1500 − 32)
 - [ ] 5.5 Keepalives and tunnel state
 
 ### 6 — TUN

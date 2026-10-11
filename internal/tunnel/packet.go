@@ -20,6 +20,21 @@ const (
 	typeKeepalive = 0x02 // no payload: "I'm still here" (step 5.5)
 )
 
+// Overhead and tunnel MTU. Every inner datagram travels inside outer IPv4 (20) + UDP (8) + the
+// tunnel header (4). For the outer packet to fit one 1500-byte Ethernet frame, the inner datagram
+// can be at most 1500 - 32 = 1468 bytes: that is this tunnel's MTU.
+//
+// Theory: _networking-lessons/5-tunneling.md#tunnel-overhead
+// Theory: _networking-lessons/5-tunneling.md#tunnel-mtu
+// Theory: _networking-lessons/1-network-fundamentals.md#why-vpns-care-about-mtu
+const (
+	linkMTU    = 1500
+	ipv4Header = 20
+	udpHeader  = 8
+	overhead   = ipv4Header + udpHeader + headerSize // 32 bytes added to every inner datagram
+	tunnelMTU  = linkMTU - overhead                  // 1468: the largest inner datagram we accept
+)
+
 // packet is one tunnel message, decoded.
 type packet struct {
 	typ     byte

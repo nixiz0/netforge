@@ -84,8 +84,11 @@ relay.Pipe:   client ── io.Copy (goroutine) ──▶ upstream    + CloseWri
 - Server: outer UDP socket on `ServerAddr`, inner connected socket to the target. Client: the mirror image, inner UDP socket on `ClientAddr` (apps send here), outer connected socket to the server. Each endpoint runs two loops, one per direction: one side `encode`s, the other `decode`s.
 - Tunnel state: the server remembers the client's outer address, the client remembers the local app; each is learned from the last packet and shared between the two goroutines under a `sync.Mutex`. One peer and one app only (point-to-point).
 - Malformed packets are dropped and logged; nothing reaches the target.
+- Tunnel MTU: `tunnelMTU = linkMTU (1500) − overhead (20 IPv4 + 8 UDP + 4 tunnel header) = 1468`. Both ends drop inner datagrams above it instead of letting the outer packet fragment; logs show the on-the-wire size. A test pins the arithmetic.
 
 ## Known limitations (deliberate, for now)
+
+- Tunnel MTU assumes a 1500-byte path and an IPv4 outer header; no path MTU discovery, and oversized datagrams are dropped silently (no ICMP "fragmentation needed" back to the sender).
 
 - Only the first request per client connection is parsed; later requests on a kept-alive connection go to the first target.
 - Hop-by-hop headers (`Proxy-Connection`, `Connection`, ...) are forwarded untouched.
