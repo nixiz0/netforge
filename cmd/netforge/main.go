@@ -41,6 +41,8 @@ func main() {
 			err = tunnel.RunServer(defaultAddr)
 		case len(os.Args) > 2 && os.Args[2] == "client":
 			err = tunnel.RunClient(tunnel.ServerAddr)
+		case len(os.Args) > 5 && os.Args[2] == "tun":
+			err = tunnelTUN(os.Args[3], os.Args[4], os.Args[5])
 		default:
 			usage()
 		}
@@ -66,6 +68,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  udpdial [addr]  send each typed line as one UDP datagram to addr (default "+defaultAddr+"), print replies")
 	fmt.Fprintln(os.Stderr, "  tunnel server   tunnel endpoint on "+tunnel.ServerAddr+"/udp: decapsulate, forward to "+defaultAddr+"/udp, wrap replies")
 	fmt.Fprintln(os.Stderr, "  tunnel client   tunnel entrance on "+tunnel.ClientAddr+"/udp: wrap app datagrams, send them to "+tunnel.ServerAddr)
+	fmt.Fprintln(os.Stderr, "  tunnel tun <iface> <listen> <peer>   (Linux, sudo) carry the IP packets of TUN <iface> to <peer> over UDP")
 	fmt.Fprintln(os.Stderr, "  tun             (Linux, sudo) create TUN interface "+tun.Name+" and log every IP packet routed into it")
 	os.Exit(2)
 }
@@ -76,4 +79,15 @@ func addrArg() string {
 		return os.Args[2]
 	}
 	return defaultAddr
+}
+
+// tunnelTUN opens the TUN interface iface and carries its IP packets to peer through the tunnel.
+// main wires the two packages together, so tunnel never imports tun.
+func tunnelTUN(iface, listen, peer string) error {
+	dev, err := tun.Open(iface)
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+	return tunnel.RunTUN(dev, listen, peer)
 }

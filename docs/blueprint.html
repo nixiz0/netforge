@@ -210,7 +210,7 @@ code, .mono { font-family: var(--font-mono); }
 
 <script>
 /* =================== DATA: keep in sync with the repo at every step =================== */
-const SYNC = { step: "6.3", what: "ping answered from userspace" };
+const SYNC = { step: "6.4", what: "IP packets through the tunnel" };
 
 // Packet layers (filters). "lost" packets count as TCP control.
 const LAYERS = { ctl: "TCP control", dns: "DNS", data: "Data", tls: "TLS", udp: "UDP datagram", ip: "IP packet" };
@@ -226,12 +226,13 @@ const NODES = {
   tclient: { x: 200, y: 610, label: "tunnel client", sub: "internal/tunnel", port: ":5300", script: "internal/tunnel/client.go" },
   tserver: { x: 448, y: 610, label: "tunnel server", sub: "internal/tunnel", port: ":7000", script: "internal/tunnel/server.go" },
   tun:    { x: 633, y: 230, label: "nf0 (TUN)", sub: "internal/tun", port: "10.10.0.1", script: "internal/tun/tun.go" },
+  peer:   { x: 860, y: 225, label: "peer · nfpeer", sub: "nf1 + netforge", port: "10.10.0.2", script: "internal/tunnel/vpn.go" },
   router: { x: 633, y: 400, label: "home router", sub: "NAT", info: "Swaps your private IP 192.168.1.20 for your public IP on the way out, and remembers the mapping for replies.", th: "1-network-fundamentals.md#12-nat|NAT" },
   dns:    { x: 860, y: 140, label: "DNS resolver", sub: "UDP", port: ":53", info: "Turns example.com into an IP address before any TCP connection can start.", th: "1-network-fundamentals.md#18-dns|DNS" },
   site:   { x: 860, y: 310, label: "example.com", sub: "203.0.113.10", port: ":80 :443", info: "A real web server. Through the proxy it only sees the proxy's connection, never curl's.", th: "3-http-tls-proxies.md#forward-proxy|Forward proxy" },
   void:   { x: 860, y: 480, label: "10.255.255.1", sub: "nobody home", info: "No machine answers. SYNs disappear and the dial times out.", th: "2-transport-networking.md#retransmission|Retransmission" }
 };
-const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "tclient", 1], ["tclient", "tserver", 1], ["dial", "router"], ["proxy", "router"], ["socks", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
+const LINKS = [["term", "proxy", 1], ["term", "socks", 1], ["dial", "echo", 1], ["dial", "closed", 1], ["dial", "tclient", 1], ["tclient", "tserver", 1], ["tun", "peer"], ["dial", "router"], ["proxy", "router"], ["socks", "router"], ["router", "dns"], ["router", "site"], ["router", "void"]]; // 1 = loopback
 
 // Go files: shown in the Script card.
 const FILES = {
@@ -250,6 +251,7 @@ const FILES = {
   "internal/tun/tun.go": { role: "TUN interface nf0 (Linux): every routed IP packet lands here", cmd: "sudo /tmp/netforge tun", fns: [["tun.Open(name)", "/dev/net/tun + ioctl TUNSETIFF (IFF_TUN | IFF_NO_PI)"], ["tun.Run()", "one Read = one whole IP packet, decoded and logged; pings answered with dev.Write"]] },
   "internal/tun/ipv4.go": { role: "IPv4 header parser (tested)", cmd: "go test ./internal/tun", fns: [["parseIPv4(b)", "version, IHL, total length, TTL, protocol, src, dst"], ["protocolName(p)", "1 ICMP · 6 TCP · 17 UDP"]] },
   "internal/tun/icmp.go": { role: "Internet checksum and ping replies (tested)", cmd: "go test ./internal/tun", fns: [["checksum(b)", "RFC 1071: 16-bit sums, fold carries, flip bits"], ["echoReply(pkt, h)", "swap src/dst, type 8 → 0, recompute both checksums"]] },
+  "internal/tunnel/vpn.go": { role: "IP packets between a TUN interface and a fixed peer (both ends run it)", cmd: "sudo /tmp/netforge tunnel tun nf0 192.168.100.1:7000 192.168.100.2:7000", fns: [["tunnel.RunTUN(dev, listen, peer)", "TUN → encode → UDP · UDP → decode → TUN"], ["innerAddrs(ip)", "inner source and destination, for the logs only"]] },
   "internal/relay/relay.go": { role: "Shared two-way copy (used by proxy and socks)", cmd: "library, no command", fns: [["relay.Pipe(client, fromClient, up)", "io.Copy both ways; client FIN passed on with CloseWrite"]] }
 };
 
@@ -505,6 +507,24 @@ const SCENARIOS = {
       { p: ["term"], t: "ip", l: "ping 10.10.0.1 (own address)", f: "internal/tun/tun.go", c: "kernel: local route", k: "TUN IP addresses", s: "nf0's own address is local: the kernel answers it directly and nothing reaches our program." },
       { p: ["term", "@200,90", "@500,90", "tun"], t: "lost", l: "TCP SYN: still unanswered", f: "internal/tun/tun.go", c: "only pings are answered", k: "TUN is not the VPN", s: "Our program only knows how to answer ping. Everything else stops here: the next step sends packets into the tunnel instead." }
     ]
+  },
+  vpnpath: {
+    name: "VPN path", blurb: "Linux, two network namespaces. A real ping leaves through nf0, crosses the tunnel inside UDP, and is answered by the other machine's kernel.",
+    run: ["sudo bash scripts/lab.sh up", "sudo /tmp/netforge tunnel tun nf0 192.168.100.1:7000 192.168.100.2:7000", "sudo ip netns exec nfpeer /tmp/netforge tunnel tun nf1 192.168.100.2:7000 192.168.100.1:7000", "sudo bash scripts/lab.sh tun", "ping -c 3 10.10.0.2"],
+    boot: [["root", "tunnel over TUN: outer 192.168.100.1:7000 <-> peer 192.168.100.2:7000"], ["peer", "tunnel over TUN: outer 192.168.100.2:7000 <-> peer 192.168.100.1:7000"]],
+    steps: [
+      { p: ["term", "@200,90", "@500,90", "tun"], t: "ip", l: "ICMP echo 10.10.0.1 → 10.10.0.2", f: "internal/tunnel/vpn.go", c: "kernel: route 10.10.0.0/24 dev nf0", k: "VPN send path", s: "ping creates an ordinary IP packet. Routing chooses nf0, so our program reads it." },
+      { p: ["tun", "peer"], t: "udp", l: "01 01 00 54 + 84-byte IP packet", f: "internal/tunnel/vpn.go", c: "dev.Read(buf) · packet{...}.encode() · conn.WriteTo(pkt, peer)", k: "Encapsulation", s: "The whole IP packet becomes the payload: 4-byte tunnel header + 84 bytes, inside UDP over the veth cable.",
+        log: [["root", "TUN 84-byte IP packet 10.10.0.1 -> 10.10.0.2, encapsulated 88 bytes -> 192.168.100.2:7000"]] },
+      { p: ["peer"], t: "ip", l: "inject into nf1", f: "internal/tunnel/vpn.go", c: "decode(buf[:n]) · dev.Write(pkt.payload)", k: "VPN receive path", s: "The peer unwraps it and writes it into nf1. Its kernel sees a ping for its own address and answers: a real kernel, not our code.",
+        log: [["peer", "tunnel 88 bytes <- 192.168.100.1:7000, decapsulated 84-byte IP packet 10.10.0.1 -> 10.10.0.2 -> TUN"]] },
+      { p: ["peer", "tun"], t: "udp", l: "reply, encapsulated", f: "internal/tunnel/vpn.go", c: "dev.Read(buf) on nf1 · conn.WriteTo(pkt, peer)", k: "Inner vs outer", s: "The reply takes the same road back. Outside: 192.168.100.x. Inside: 10.10.0.x, never seen by the veth cable.",
+        log: [["peer", "TUN 84-byte IP packet 10.10.0.2 -> 10.10.0.1, encapsulated 88 bytes -> 192.168.100.1:7000"]] },
+      { p: ["tun", "@500,90", "@200,90", "term"], t: "ip", l: "ICMP echo reply", f: "internal/tunnel/vpn.go", c: "decode · dev.Write(pkt.payload) on nf0", k: "Full tunnel flow", s: "Injected into nf0, delivered to ping: 0% loss, through a tunnel you wrote.",
+        log: [["root", "tunnel 88 bytes <- 192.168.100.2:7000, decapsulated 84-byte IP packet 10.10.0.2 -> 10.10.0.1 -> TUN"]] },
+      { p: ["term", "@200,90", "@500,90", "tun"], t: "ip", l: "TCP SYN → 10.10.0.2:8000", f: "internal/tunnel/vpn.go", c: "same code, any protocol", k: "Full tunnel flow", s: "curl to a web server in the namespace rides the same tunnel. The tunnel never looks inside: TCP, UDP, ICMP are all just bytes.",
+        log: [["root", "TUN 60-byte IP packet 10.10.0.1 -> 10.10.0.2, encapsulated 64 bytes -> 192.168.100.2:7000"]] }
+    ]
   }
 };
 
@@ -530,11 +550,11 @@ const THEORY = {
   "Confidentiality": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know", "Blind relay": T3 + "what-the-connect-proxy-can-still-know|What the CONNECT proxy can still know",
   "Same TCP as always": T2 + "tcp-server-lifecycle|TCP server lifecycle", "Binary, length-prefixed": T3 + "socks5-handshake|SOCKS5 handshake",
   "Method chosen": T3 + "socks5-handshake|SOCKS5 handshake", "Typed address + big-endian port": T3 + "socks5-concept|SOCKS5 concept",
-  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Encapsulation": T5 + "encapsulation|Encapsulation", "Routing controls TUN traffic": T6 + "routing-controls-tun-traffic|Routing controls TUN traffic", "TUN interface": T6 + "tun-interface|TUN interface", "Packet parsing": T6 + "packet-parsing|Packet parsing", "Internet checksum": T1 + "headers|Headers", "VPN receive path": T6 + "vpn-receive-path|VPN receive path", "TUN is not the VPN": T6 + "tun-is-not-the-vpn|TUN is not the VPN", "TUN IP addresses": T6 + "tun-ip-addresses|TUN IP addresses", "Keepalives": T5 + "keepalives|Keepalives", "NAT mapping": "4-advanced-network-concepts.md#nat-mappings-from-outbound-traffic|NAT mappings from outbound traffic", "Peer timeout": T5 + "tunnel-state|Tunnel state", "Tunnel overhead": T5 + "tunnel-overhead|Tunnel overhead", "Tunnel MTU": T5 + "tunnel-mtu|Tunnel MTU", "Tunnel entrance": T5 + "udp-tunneling|UDP tunneling", "Point-to-point tunnel": T5 + "point-to-point-tunnel|Point-to-point tunnel", "Decapsulation": T5 + "what-is-a-tunnel|What is a tunnel?", "Inner vs outer": T5 + "inner-vs-outer-packet|Inner vs outer packet", "Tunnel state": T5 + "tunnel-state|Tunnel state", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
+  "SOCKS5 reply": T3 + "socks5-handshake|SOCKS5 handshake", "No handshake": T2 + "udp-lifecycle|UDP lifecycle", "Encapsulation": T5 + "encapsulation|Encapsulation", "Routing controls TUN traffic": T6 + "routing-controls-tun-traffic|Routing controls TUN traffic", "TUN interface": T6 + "tun-interface|TUN interface", "Packet parsing": T6 + "packet-parsing|Packet parsing", "Internet checksum": T1 + "headers|Headers", "VPN receive path": T6 + "vpn-receive-path|VPN receive path", "VPN send path": T6 + "vpn-send-path|VPN send path", "Full tunnel flow": T5 + "full-tunnel-flow|Full tunnel flow", "TUN is not the VPN": T6 + "tun-is-not-the-vpn|TUN is not the VPN", "TUN IP addresses": T6 + "tun-ip-addresses|TUN IP addresses", "Keepalives": T5 + "keepalives|Keepalives", "NAT mapping": "4-advanced-network-concepts.md#nat-mappings-from-outbound-traffic|NAT mappings from outbound traffic", "Peer timeout": T5 + "tunnel-state|Tunnel state", "Tunnel overhead": T5 + "tunnel-overhead|Tunnel overhead", "Tunnel MTU": T5 + "tunnel-mtu|Tunnel MTU", "Tunnel entrance": T5 + "udp-tunneling|UDP tunneling", "Point-to-point tunnel": T5 + "point-to-point-tunnel|Point-to-point tunnel", "Decapsulation": T5 + "what-is-a-tunnel|What is a tunnel?", "Inner vs outer": T5 + "inner-vs-outer-packet|Inner vs outer packet", "Tunnel state": T5 + "tunnel-state|Tunnel state", "Fits one frame": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "Fragmentation": T1 + "fragmentation|Fragmentation", "Max datagram": T1 + "20-mtu-fragmentation-and-mss|MTU, fragmentation and MSS", "No connection check": T2 + "udp-essentials|UDP essentials", "ICMP feedback": T1 + "19-icmp-ping-traceroute-and-ip-ttl|ICMP, ping, traceroute and IP TTL", "Loss is silent": T2 + "udp-essentials|UDP essentials", "Read deadline": T2 + "tcp-vs-udp|TCP vs UDP", "Connected UDP": T2 + "udp-lifecycle|UDP lifecycle", "Reply needs an address": T2 + "udp-lifecycle|UDP lifecycle", "Datagram boundaries": T2 + "udp-preserves-datagram-boundaries|UDP preserves datagram boundaries", "Nothing to close": T2 + "tcp-vs-udp|TCP vs UDP", "Proxy-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "Client-side DNS": T3 + "dns-with-socks5|DNS with SOCKS5", "DNS leak": T3 + "dns-with-socks5|DNS with SOCKS5", "Data is relayed": T3 + "socks5-handshake|SOCKS5 handshake"
 };
 
-const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "done"], ["TUN", "next"], ["VPN"], ["Encryption"], ["Multi-peer"]];
-const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2", tun: "#ffb38a", tserver: "#9fe0b0", tclient: "#f2c78f" };
+const ROADMAP = [["TCP", "done"], ["HTTP proxy", "done"], ["SOCKS5", "done"], ["UDP", "done"], ["Tunnel", "done"], ["TUN", "done"], ["VPN", "next"], ["Encryption"], ["Multi-peer"]];
+const WHO = { dial: "#b8c1e8", echo: "#8fd3c9", proxy: "#f4d47e", socks: "#d9b8f2", tun: "#ffb38a", tserver: "#9fe0b0", tclient: "#f2c78f", root: "#ffb38a", peer: "#9fe0b0" };
 
 /* =================== engine =================== */
 const $ = (s) => document.querySelector(s);

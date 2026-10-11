@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux (WSL): keep LF line endings even on a Windows checkout.
+*.sh text eol=lf
