@@ -186,5 +186,3 @@ netforge pubkey <keyfile>
 netforge vpn server <key> <peer.pub>=<vpn ip>...     # Linux only, sudo
 netforge vpn client <host:port> <key> <peer.pub>     # Linux only, sudo
 ```
-
-One small step at a time. VPN is not a proxy.
