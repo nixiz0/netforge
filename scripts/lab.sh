@@ -13,6 +13,8 @@
 #   lab.sh route     client: send 203.0.113.0/24 into the tunnel; host: route back to 10.10.0.0/24
 #   lab.sh forward   server: turn on IP forwarding, so it routes between nf0 and veth2
 #   lab.sh nat       host: forget the return route; server: NAT the VPN subnet behind 203.0.113.1
+#   lab.sh full      client: send ALL IPv4 traffic into the tunnel (WSL loses internet until full-off)
+#   lab.sh full-off  client: back to normal routing
 #   lab.sh down      remove everything (stop the netforge processes first)
 #
 # Theory: _networking-lessons/4-advanced-network-concepts.md#linux-network-namespaces
@@ -74,6 +76,25 @@ nat)
 	ip netns exec nfpeer iptables -t nat -A POSTROUTING -s 10.10.0.0/24 -o veth2 -j MASQUERADE
 	echo "NAT: 10.10.0.0/24 leaves the server as 203.0.113.1 | host has no route to 10.10.0.0/24"
 	;;
+full)
+	# Two halves, 0.0.0.0/1 and 128.0.0.0/1, cover every IPv4 address. Each is more specific than the
+	# default route (/0), so it wins by longest-prefix match without deleting it: easy to undo.
+	# Theory: _networking-lessons/7-vpn-architecture.md#full-tunnel
+	# Theory: _networking-lessons/1-network-fundamentals.md#longest-prefix-match
+	ip route add 0.0.0.0/1 dev nf0
+	ip route add 128.0.0.0/1 dev nf0
+	# The tunnel's own packets to the server must NOT enter nf0, or they would loop forever. Here the
+	# server (192.168.100.2) is on the connected /24 of veth0, more specific than /1, so it stays safe.
+	# A real client adds a /32 route to the server via its old gateway before switching.
+	# Theory: _networking-lessons/7-vpn-architecture.md#avoid-routing-the-tunnel-into-itself
+	echo "full tunnel on: $(ip route get 1.1.1.1 | head -1)"
+	echo "server stays outside: $(ip route get 192.168.100.2 | head -1)"
+	;;
+full-off)
+	ip route del 0.0.0.0/1 dev nf0 2>/dev/null || true
+	ip route del 128.0.0.0/1 dev nf0 2>/dev/null || true
+	echo "full tunnel off: $(ip route get 1.1.1.1 | head -1)"
+	;;
 down)
 	ip netns del nfnet 2>/dev/null || true
 	ip netns del nfpeer 2>/dev/null || true
@@ -81,7 +102,7 @@ down)
 	echo "lab down"
 	;;
 *)
-	echo "usage: $0 up|tun|route|forward|nat|down" >&2
+	echo "usage: $0 up|tun|route|forward|nat|full|full-off|down" >&2
 	exit 2
 	;;
 esac
