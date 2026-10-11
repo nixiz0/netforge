@@ -44,12 +44,14 @@ up)
 	echo "lab up: client 192.168.100.1 <-> server 192.168.100.2 | server 203.0.113.1 <-> host 203.0.113.10"
 	;;
 tun)
-	# MTU 1468 = 1500 - 32 bytes of tunnel overhead, so every outer packet fits one frame.
+	# MTU 1440 = 1500 - 60 bytes of overhead (IPv4 20 + UDP 8 + tunnel header 4 + nonce 12 + tag 16),
+	# so every encrypted outer packet still fits one 1500-byte frame.
+	# Theory: _networking-lessons/7-vpn-architecture.md#vpn-mtu
 	ip addr add 10.10.0.1/24 dev nf0
-	ip link set nf0 up mtu 1468
+	ip link set nf0 up mtu 1440
 	ip netns exec nfpeer ip addr add 10.10.0.2/24 dev nf0
-	ip netns exec nfpeer ip link set nf0 up mtu 1468
-	echo "TUN up: client nf0 10.10.0.1 <-> server nf0 10.10.0.2 (MTU 1468)"
+	ip netns exec nfpeer ip link set nf0 up mtu 1440
+	echo "TUN up: client nf0 10.10.0.1 <-> server nf0 10.10.0.2 (MTU 1440)"
 	;;
 route)
 	# Split tunnel: only this network goes through the VPN; everything else keeps the normal path.

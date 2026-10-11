@@ -21,11 +21,19 @@ const VPNPort = "7000"
 // Server mode (serverAddr == ""): the client's address is learned from its packets, so the client
 // can sit behind NAT and change address (roaming) without any configuration.
 //
+// Every packet, keepalives included, is sealed with key (see crypto.go): the real network only
+// sees ciphertext, and packets from anyone without the key are dropped before they can change
+// anything, so nobody can take the client's place.
+//
 // dev is any io.ReadWriter, so this package never depends on how the TUN interface was opened.
 //
 // Theory: _networking-lessons/6-tun-tap.md#vpn-send-path
 // Theory: _networking-lessons/7-vpn-architecture.md#vpn-endpoint-vs-vpn-address
-func RunTUN(dev io.ReadWriter, listen, serverAddr string) error {
+func RunTUN(dev io.ReadWriter, listen, serverAddr string, key []byte) error {
+	crypt, err := newSealer(key)
+	if err != nil {
+		return err
+	}
 	conn, err := net.ListenPacket("udp", listen)
 	if err != nil {
 		return err
@@ -40,18 +48,19 @@ func RunTUN(dev io.ReadWriter, listen, serverAddr string) error {
 	}
 	// Tunnel state: who is on the other side and when we last heard from it.
 	var remote peer
-	keepalive := packet{typ: typeKeepalive}.encode()
+	// A keepalive is an empty sealed packet: a fresh nonce each time, and the tag proves who sent it.
+	keepalive := func() []byte { return crypt.seal(typeKeepalive, nil) }
 
 	if server != nil {
 		log.Printf("VPN client: outer %s -> server %s", conn.LocalAddr(), server)
 		// Keepalives: one now, then every 5 s. A server silent for 15 s means the tunnel is down.
 		// Theory: _networking-lessons/5-tunneling.md#keepalives
-		conn.WriteTo(keepalive, server)
+		conn.WriteTo(keepalive(), server)
 		go func() {
 			t := time.NewTicker(keepaliveInterval)
 			defer t.Stop()
 			for range t.C {
-				conn.WriteTo(keepalive, server)
+				conn.WriteTo(keepalive(), server)
 				if _, ok := remote.expire(peerTimeout); ok {
 					log.Printf("tunnel down: no answer from the server for %s", peerTimeout)
 				}
@@ -84,7 +93,8 @@ func RunTUN(dev io.ReadWriter, listen, serverAddr string) error {
 				log.Println("outer read:", err)
 				continue
 			}
-			pkt, err := decode(buf[:n])
+			// Check before trusting: only an authentic packet may update the peer address below.
+			pkt, err := crypt.open(buf[:n])
 			if err != nil {
 				log.Printf("drop %d bytes from %s: %v", n, from, err)
 				continue
@@ -101,14 +111,14 @@ func RunTUN(dev io.ReadWriter, listen, serverAddr string) error {
 			switch pkt.typ {
 			case typeKeepalive:
 				if server == nil {
-					conn.WriteTo(keepalive, from) // the server answers, so the client knows it is up
+					conn.WriteTo(keepalive(), from) // the server answers, so the client knows it is up
 				}
 			case typeData:
 				if _, err := dev.Write(pkt.payload); err != nil {
 					log.Println("TUN write:", err)
 					continue
 				}
-				log.Printf("tunnel %d bytes <- %s, decapsulated %d-byte IP packet %s -> TUN", n, from, len(pkt.payload), innerAddrs(pkt.payload))
+				log.Printf("tunnel %d bytes <- %s, decrypted %d-byte IP packet %s -> TUN", n, from, len(pkt.payload), innerAddrs(pkt.payload))
 			}
 		}
 	}()
@@ -131,16 +141,16 @@ func RunTUN(dev io.ReadWriter, listen, serverAddr string) error {
 			log.Printf("drop %d-byte IP packet %s: no client connected", n, innerAddrs(buf[:n]))
 			continue
 		}
-		if n > tunnelMTU {
-			log.Printf("drop %d-byte IP packet: above the tunnel MTU (%d), set the interface MTU to %d", n, tunnelMTU, tunnelMTU)
+		if n > vpnMTU {
+			log.Printf("drop %d-byte IP packet: above the VPN MTU (%d), set the interface MTU to %d", n, vpnMTU, vpnMTU)
 			continue
 		}
-		pkt := packet{typ: typeData, payload: buf[:n]}.encode()
+		pkt := crypt.seal(typeData, buf[:n])
 		if _, err := conn.WriteTo(pkt, dest); err != nil {
 			log.Println("outer write:", err)
 			continue
 		}
-		log.Printf("TUN %d-byte IP packet %s, encapsulated %d bytes -> %s", n, innerAddrs(buf[:n]), len(pkt), dest)
+		log.Printf("TUN %d-byte IP packet %s, encrypted %d bytes -> %s", n, innerAddrs(buf[:n]), len(pkt), dest)
 	}
 }
 
