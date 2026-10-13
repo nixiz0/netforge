@@ -495,3 +495,7 @@ An older and very widespread VPN that makes different choices:
 </details>
 
 > ⚠️ **Educational project.** netforge shows how a VPN works; it is not audited and not meant to protect real traffic. For real use, choose WireGuard, Tailscale or OpenVPN.
+
+## 👤 Author
+
+- [@nixiz0](https://github.com/nixiz0)
